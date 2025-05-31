@@ -17,6 +17,7 @@ import aiofiles
 import math
 import aiohttp
 from dotenv import load_dotenv
+from keep_alive import keep_alive
 
 
 # --- Configurações do Bot Discord ---
@@ -4509,4 +4510,5 @@ if DISCORD_BOT_TOKEN is None:
     print("   - Value: [SEU_TOKEN_DO_BOT_AQUI]")
     print("3. Reinicie o bot")
 else:
+    keep_alive()
     bot.run(DISCORD_BOT_TOKEN)
