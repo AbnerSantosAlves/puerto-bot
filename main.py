@@ -881,6 +881,8 @@ async def on_ready():
     print(f'Bot conectado como {bot.user.name} ({bot.user.id})')
     print('Bot pronto para uso!')
 
+
+
 # --- Help System with organized buttons ---
 class HelpView(View):
     def __init__(self, original_user_id: int):
@@ -1395,6 +1397,10 @@ async def investir(ctx, amount: int):
 @bot.command(name='banir', aliases=['ban'])
 @commands.has_permissions(ban_members=True)
 async def banir(ctx, member: discord.Member, *, reason="Não especificado"):
+    if member.top_role >= ctx.author.top_role:
+        await ctx.send("❌ Você não pode banir um usuário com cargo superior ao seu!")
+        return
+
     try:
         await member.ban(reason=reason)
         embed = discord.Embed(
@@ -1411,6 +1417,9 @@ async def banir(ctx, member: discord.Member, *, reason="Não especificado"):
 @bot.command(name='expulsar', aliases=['kick'])
 @commands.has_permissions(kick_members=True)
 async def expulsar(ctx, member: discord.Member, *, reason="Não especificado"):
+    if member.top_role >= ctx.author.top_role:
+        await ctx.send("❌ Você não pode expulsar um usuário com cargo superior ao seu!")
+        return
     try:
         await member.kick(reason=reason)
         embed = discord.Embed(
@@ -1427,6 +1436,9 @@ async def expulsar(ctx, member: discord.Member, *, reason="Não especificado"):
 @bot.command(name='mutar', aliases=['mute'])
 @commands.has_permissions(manage_messages=True)
 async def mutar(ctx, member: discord.Member, duration: str = "10m", *, reason="Não especificado"):
+    if member.top_role >= ctx.author.top_role:
+        await ctx.send("❌ Você não pode mutar um usuário com cargo superior ao seu!")
+        return
     # Parse duration
     time_units = {"m": 60, "h": 3600, "d": 86400}
     duration_seconds = 600  # default 10 minutes
@@ -2249,6 +2261,15 @@ async def on_command_error(ctx, error):
         print(f"Erro não tratado: {error}")
 
 # --- 30 Novos Comandos ---
+
+# Commando pra invitar
+CLIENT_ID = '1377549020842692728'
+@bot.command()
+async def invite(ctx):
+    permissions = discord.Permissions(administrator=True)  # ou personalize como quiser
+    invite_url = discord.utils.oauth_url(client_id=CLIENT_ID, permissions=permissions)
+    await ctx.send(f"🔗 Me adicione no seu servidor com este link:\n{invite_url}")
+
 
 # 1. Comando de Shop/Loja
 @bot.command(name='loja', aliases=['shop'])
