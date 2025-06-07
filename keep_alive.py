@@ -12,10 +12,10 @@ def home():
 def status():
     return {"status": "online", "bot": "MXP VADOS", "system": "active"}
 
-# ✅ Rota para baixar arquivo
+# ✅ Rota para download do arquivo diretamente da raiz
 @app.route('/download/<filename>')
 def download_file(filename):
-    file_path = os.path.join('files', filename)  # Substitua por seu caminho real
+    file_path = os.path.join(os.getcwd(), filename)  # Busca na raiz do projeto
     if os.path.exists(file_path):
         return send_file(file_path, as_attachment=True)
     return {"error": "Arquivo não encontrado"}, 404
