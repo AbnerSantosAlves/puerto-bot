@@ -138,6 +138,38 @@ init_database()
 # Tradutor
 translator = Translator()
 
+# Funções para streak diário
+def get_daily_streak(user_id):
+    """Obtém sequência de dias consecutivos"""
+    conn = sqlite3.connect('bot_database.db')
+    cursor = conn.cursor()
+    
+    # Adicionar coluna streak se não existir
+    cursor.execute("PRAGMA table_info(economy)")
+    columns = [column[1] for column in cursor.fetchall()]
+    if 'daily_streak' not in columns:
+        cursor.execute('ALTER TABLE economy ADD COLUMN daily_streak INTEGER DEFAULT 0')
+    
+    cursor.execute('SELECT daily_streak FROM economy WHERE user_id = ?', (user_id,))
+    result = cursor.fetchone()
+    conn.close()
+    return result[0] if result else 0
+
+def update_daily_streak(user_id):
+    """Atualiza sequência diária"""
+    conn = sqlite3.connect('bot_database.db')
+    cursor = conn.cursor()
+    
+    current_streak = get_daily_streak(user_id)
+    new_streak = current_streak + 1
+    
+    cursor.execute('UPDATE economy SET daily_streak = ? WHERE user_id = ?', (new_streak, user_id))
+    if cursor.rowcount == 0:
+        cursor.execute('INSERT INTO economy (user_id, daily_streak) VALUES (?, ?)', (user_id, new_streak))
+    
+    conn.commit()
+    conn.close()
+
 # Lista de trabalhos para ganhar dinheiro
 trabalhos = [
     {"nome": "Entregador de pizza", "min": 50, "max": 150},
@@ -472,7 +504,8 @@ def gerar_embed_carreira(user, dados):
     embed.set_footer(text="╰ㆍ┈┈ㆍ◜ᨒ◞ㆍ┈┈ㆍ\nUse p!ranking para ver os melhores da temporada! - Dev: YevgennyMXP", icon_url=user.guild.icon.url if user.guild and user.guild.icon else None)
 
     embed.add_field(name="⠀", value=
-        "ㆍ┈┈ㆍ◜ᨒ◞ㆍ┈┈ㆍ       ﹐ꜜ __‹👤›__ **__I__dentidade do __J__ogador !** __‹👤›__ ꜜ﹐\n"
+        
+                    "   ﹐ꜜ __‹👤›__ **__I__dentidade!** __‹👤›__ ꜜ﹐\n"
         f"╰▸ ‹ 👤 › ৎ˚₊ Nome: **{dados.get('nome', 'N/A')}**\n"
         f"╰▸ ‹ 🏳️ › ৎ˚₊ Nacionalidade: **{dados.get('nacionalidade', 'N/A')}**\n"
         f"╰▸ ‹ ⛳ › ৎ˚₊ Posição: **{dados.get('posicao', 'N/A')}**\n"
@@ -529,7 +562,7 @@ def gerar_embed_rolls(user, rolls_data, is_own_rolls):
         color=discord.Color.blue()
     )
     embed.set_thumbnail(url=user.display_avatar.url)
-    embed.set_image(url="https://media.discordapp.net/attachments/1340423194703822883/1377864414899863694/Picsart_25-05-30_01-20-21-837.png?ex=683a83bb&is=6839323b&hm=5f47ea1cffeecbf4979ea06023b6d8a304bc3b2cf5170181f5c2a79a05b07078&")
+    embed.set_image(url="https://media.discordapp.net/attachments/1375957371121045605/1385648920826482718/rolls.jpg?ex=6856d59e&is=6855841e&hm=2fee840eb2cf8983ca60f8d9c24d3d4f8f180e680f6af012cf6dbbb75caadc1b&=&format=webp")
     embed.set_footer(text="╰ㆍ┈┈ㆍ◜ᨒ◞ㆍ┈┈ㆍ\nUse p!editar <atributo> <roll> - Dev: YevgennyMXP")
 
     embed.add_field(name="⠀", value=
@@ -1105,11 +1138,6 @@ class HelpView(View):
 
 # --- Comandos do Bot ---
 
-@bot.command(name='ajuda', aliases=['help'])
-async def ajuda(ctx):
-    help_view = HelpView(ctx.author.id)
-    await ctx.reply(embed=help_view.get_main_embed(), view=help_view)
-
 @bot.command(name='ping')
 async def ping(ctx):
     # Calculando métricas em tempo real
@@ -1223,19 +1251,44 @@ async def ping(ctx):
 async def diario(ctx):
     user_id = ctx.author.id
     if can_daily(user_id):
-        amount = random.randint(100, 300)
-        add_user_money(user_id, amount)
+        # Bônus diário reduzido e mais equilibrado
+        base_amount = random.randint(50, 150)
+        
+        # Bônus por streak (dias consecutivos)
+        current_streak = get_daily_streak(user_id)
+        streak_bonus = min(current_streak * 5, 50)  # Máximo 50 de bônus
+        
+        total_amount = base_amount + streak_bonus
+        
+        add_user_money(user_id, total_amount)
         set_daily_claimed(user_id)
+        update_daily_streak(user_id)
+        
         embed = discord.Embed(
             title="💰 Bônus Diário Coletado!",
-            description=f"Parabéns! Você coletou seu bônus diário de `{amount}` moedas. Seu novo saldo é `{get_user_money(user_id)}`.",
+            description=f"Parabéns! Você coletou seu bônus diário!",
             color=discord.Color.green()
+        )
+        embed.add_field(
+            name="💵 Recompensa",
+            value=f"**Base:** {base_amount} moedas\n**Streak Bonus:** +{streak_bonus} moedas\n**Total:** {total_amount} moedas",
+            inline=True
+        )
+        embed.add_field(
+            name="🔥 Sequência",
+            value=f"**{current_streak + 1} dias** consecutivos\n*Continue coletando para aumentar o bônus!*",
+            inline=True
+        )
+        embed.add_field(
+            name="💰 Saldo Atual",
+            value=f"**{get_user_money(user_id)}** moedas",
+            inline=False
         )
         await ctx.reply(embed=embed)
     else:
         embed = discord.Embed(
             title="⏰ Bônus Diário Já Coletado",
-            description="Você já coletou seu bônus diário. Volte amanhã!",
+            description="Você já coletou seu bônus diário. Volte amanhã para manter sua sequência!",
             color=discord.Color.orange()
         )
         await ctx.reply(embed=embed)
@@ -1245,19 +1298,79 @@ async def trabalhar(ctx):
     user_id = ctx.author.id
     if can_work(user_id):
         job = random.choice(trabalhos)
-        payout = random.randint(job["min"], job["max"])
-        add_user_money(user_id, payout)
-        set_work_done(user_id)
-        embed = discord.Embed(
-            title="👨‍💻 Trabalho Concluído!",
-            description=f"Você trabalhou como **{job['nome']}** e ganhou `{payout}` moedas! Seu novo saldo é `{get_user_money(user_id)}`.",
-            color=discord.Color.blue()
-        )
+        
+        # Aumentar dificuldade com chance de falha
+        success_rate = random.randint(1, 100)
+        
+        if success_rate <= 75:  # 75% chance de sucesso
+            # Sucesso total
+            payout = random.randint(job["min"], job["max"])
+            add_user_money(user_id, payout)
+            set_work_done(user_id)
+            
+            embed = discord.Embed(
+                title="👨‍💻 Trabalho Concluído com Sucesso!",
+                description=f"Você trabalhou como **{job['nome']}** com excelência!",
+                color=discord.Color.green()
+            )
+            embed.add_field(
+                name="💰 Pagamento",
+                value=f"**+{payout} moedas**\nSaldo atual: {get_user_money(user_id)} moedas",
+                inline=True
+            )
+            embed.add_field(
+                name="📊 Performance",
+                value="✅ **Excelente**\nTrabaho realizado perfeitamente!",
+                inline=True
+            )
+            
+        elif success_rate <= 90:  # 15% chance de sucesso parcial
+            # Sucesso parcial
+            payout = random.randint(job["min"] // 2, job["max"] // 2)
+            add_user_money(user_id, payout)
+            set_work_done(user_id)
+            
+            embed = discord.Embed(
+                title="👨‍💻 Trabalho Parcialmente Concluído",
+                description=f"Você trabalhou como **{job['nome']}**, mas teve algumas dificuldades.",
+                color=discord.Color.orange()
+            )
+            embed.add_field(
+                name="💰 Pagamento Reduzido",
+                value=f"**+{payout} moedas** (50% do valor)\nSaldo atual: {get_user_money(user_id)} moedas",
+                inline=True
+            )
+            embed.add_field(
+                name="📊 Performance",
+                value="⚠️ **Mediano**\nTente melhorar na próxima!",
+                inline=True
+            )
+            
+        else:  # 10% chance de falha
+            # Falha total
+            set_work_done(user_id)
+            
+            embed = discord.Embed(
+                title="😓 Trabalho Mal Sucedido",
+                description=f"Infelizmente, seu trabalho como **{job['nome']}** não saiu como esperado...",
+                color=discord.Color.red()
+            )
+            embed.add_field(
+                name="💸 Sem Pagamento",
+                value="**+0 moedas**\nTente novamente em 1 hora!",
+                inline=True
+            )
+            embed.add_field(
+                name="📊 Performance",
+                value="❌ **Insatisfatório**\nNão desista, a prática leva à perfeição!",
+                inline=True
+            )
+        
         await ctx.reply(embed=embed)
     else:
         embed = discord.Embed(
             title="⏳ Em Tempo de Descanso",
-            description="Você já trabalhou recentemente. Você pode trabalhar novamente em 1 hora.",
+            description="Você já trabalhou recentemente. Descanse e volte em 1 hora!",
             color=discord.Color.orange()
         )
         await ctx.reply(embed=embed)
@@ -1291,7 +1404,7 @@ async def pagar_dinheiro(ctx, member: discord.Member, amount: int):
             description=f"Você não tem `{amount}` moedas para enviar. Seu saldo atual é `{get_user_money(sender_id)}`.",
             color=discord.Color.red()
         )
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
         return
 
     remove_user_money(sender_id, amount)
@@ -1302,12 +1415,12 @@ async def pagar_dinheiro(ctx, member: discord.Member, amount: int):
         description=f"Você enviou `{amount}` moedas para **{member.display_name}**. Seu novo saldo é `{get_user_money(sender_id)}`.",
         color=discord.Color.teal()
     )
-    await ctx.send(embed=embed)
+    awaitctx.reply(embed=embed)
 
 @bot.command(name='ranking_money')
 async def ranking_money(ctx):
     ranking_embed = gerar_ranking_embed(ctx, "money", "Mais Ricos")
-    await ctx.send(embed=ranking_embed)
+    awaitctx.reply(embed=ranking_embed)
 
 @bot.command(name='apostar', aliases=['bet', 'tigrinho'])
 async def apostar_command(ctx, amount: int):
@@ -1320,7 +1433,7 @@ async def apostar_command(ctx, amount: int):
             description="A quantia da aposta deve ser um número positivo.",
             color=discord.Color.red()
         )
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
         return
 
     if current_money < amount:
@@ -1329,7 +1442,7 @@ async def apostar_command(ctx, amount: int):
             description=f"Você não tem `{amount}` moedas para apostar. Seu saldo atual é `{current_money}`.",
             color=discord.Color.red()
         )
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
         return
 
     embed = discord.Embed(
@@ -1353,7 +1466,17 @@ async def investir(ctx, amount: int):
             description="A quantia do investimento deve ser um número positivo.",
             color=discord.Color.red()
         )
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
+        return
+
+    # Limitar investimento máximo a 10.000 moedas
+    if amount > 10000:
+        embed = discord.Embed(
+            title="🚫 Limite de Investimento Excedido",
+            description="O valor máximo para investimento é **10.000 moedas** por transação.\n\nIsso garante um mercado mais equilibrado e justo para todos!",
+            color=discord.Color.red()
+        )
+        awaitctx.reply(embed=embed)
         return
 
     if current_money < amount:
@@ -1362,14 +1485,22 @@ async def investir(ctx, amount: int):
             description=f"Você não tem `{amount}` moedas para investir. Seu saldo atual é `{current_money}`.",
             color=discord.Color.red()
         )
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
         return
 
     remove_user_money(user_id, amount)
 
     investment = random.choice(investimentos)
-    multiplier = random.uniform(investment["min_mult"], investment["max_mult"])
-    return_amount = int(amount * multiplier)
+    
+    # Tornar investimentos mais voláteis e arriscados
+    base_multiplier = random.uniform(investment["min_mult"], investment["max_mult"])
+    
+    # Adicionar volatilidade extra baseada no valor investido
+    volatility_factor = min(amount / 5000, 1.0)  # Mais volatilidade para valores maiores
+    volatility_adjustment = random.uniform(-0.3 * volatility_factor, 0.3 * volatility_factor)
+    
+    final_multiplier = max(0.1, base_multiplier + volatility_adjustment)  # Mínimo 10% de retorno
+    return_amount = int(amount * final_multiplier)
 
     add_user_money(user_id, return_amount)
     profit = return_amount - amount
@@ -1377,28 +1508,59 @@ async def investir(ctx, amount: int):
     if profit > 0:
         result_text = f"📈 **Lucro!** Você ganhou `{profit}` moedas!"
         color = discord.Color.green()
+        performance_emoji = "🎉"
     elif profit < 0:
         result_text = f"📉 **Prejuízo!** Você perdeu `{abs(profit)}` moedas!"
         color = discord.Color.red()
+        performance_emoji = "😢"
     else:
         result_text = "📊 **Empate!** Você não ganhou nem perdeu nada!"
         color = discord.Color.orange()
+        performance_emoji = "😐"
 
     embed = discord.Embed(
         title="💼 Resultado do Investimento",
-        description=f"Você investiu `{amount}` moedas em **{investment['nome']}** (Risco: {investment['risco']})\n\n"
-                   f"{result_text}\n\n"
-                   f"Seu novo saldo: `{get_user_money(user_id)}` moedas.",
+        description=f"{performance_emoji} **{investment['nome']}** • Risco: {investment['risco'].title()}",
         color=color
     )
-    await ctx.send(embed=embed)
+    
+    embed.add_field(
+        name="💰 Investimento",
+        value=f"**Valor:** {amount:,} moedas\n**Retorno:** {return_amount:,} moedas\n**Multiplicador:** {final_multiplier:.2f}x",
+        inline=True
+    )
+    
+    embed.add_field(
+        name="📊 Resultado",
+        value=f"{result_text}\n**Saldo atual:** {get_user_money(user_id):,} moedas",
+        inline=True
+    )
+    
+    # Adicionar dicas baseadas no resultado
+    if profit > amount * 0.5:
+        tip = "🎯 **Excelente retorno!** Continue investindo com sabedoria."
+    elif profit > 0:
+        tip = "✅ **Bom negócio!** Investimentos consistentes geram riqueza."
+    elif profit == 0:
+        tip = "⚖️ **Estabilidade** é melhor que prejuízo!"
+    else:
+        tip = "📚 **Aprendizado:** Nem todo investimento é garantia de lucro."
+    
+    embed.add_field(
+        name="💡 Dica",
+        value=tip,
+        inline=False
+    )
+    
+    embed.set_footer(text=f"Limite máximo: 10.000 moedas • Mercado volátil - Dev: YevgennyMXP")
+    awaitctx.reply(embed=embed)
 
 # --- Comandos de Moderação ---
 @bot.command(name='banir', aliases=['ban'])
 @commands.has_permissions(ban_members=True)
 async def banir(ctx, member: discord.Member, *, reason="Não especificado"):
     if member.top_role >= ctx.author.top_role:
-        await ctx.send("❌ Você não pode banir um usuário com cargo superior ao seu!")
+        await ctx.reply("❌ Você não pode banir um usuário com cargo superior ao seu, fudido do cacetekkkkkkkkkkkk!")
         return
 
     try:
@@ -1408,17 +1570,17 @@ async def banir(ctx, member: discord.Member, *, reason="Não especificado"):
             description=f"**{member.display_name}** foi banido do servidor.\n**Motivo:** {reason}",
             color=discord.Color.red()
         )
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
     except discord.Forbidden:
-        await ctx.send("❌ Não tenho permissão para banir este usuário.")
+        awaitctx.reply("❌ Não tenho permissão para banir este usuário.")
     except Exception as e:
-        await ctx.send(f"❌ Erro ao banir usuário: {e}")
+        awaitctx.reply(f"❌ Erro ao banir usuário: {e}")
 
 @bot.command(name='expulsar', aliases=['kick'])
 @commands.has_permissions(kick_members=True)
 async def expulsar(ctx, member: discord.Member, *, reason="Não especificado"):
     if member.top_role >= ctx.author.top_role:
-        await ctx.send("❌ Você não pode expulsar um usuário com cargo superior ao seu!")
+        awaitctx.reply("❌ Você não pode expulsar um usuário com cargo superior ao seu!")
         return
     try:
         await member.kick(reason=reason)
@@ -1427,17 +1589,17 @@ async def expulsar(ctx, member: discord.Member, *, reason="Não especificado"):
             description=f"**{member.display_name}** foi expulso do servidor.\n**Motivo:** {reason}",
             color=discord.Color.orange()
         )
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
     except discord.Forbidden:
-        await ctx.send("❌ Não tenho permissão para expulsar este usuário.")
+        awaitctx.reply("❌ Não tenho permissão para expulsar este usuário.")
     except Exception as e:
-        await ctx.send(f"❌ Erro ao expulsar usuário: {e}")
+        awaitctx.reply(f"❌ Erro ao expulsar usuário: {e}")
 
 @bot.command(name='mutar', aliases=['mute'])
 @commands.has_permissions(manage_messages=True)
 async def mutar(ctx, member: discord.Member, duration: str = "10m", *, reason="Não especificado"):
     if member.top_role >= ctx.author.top_role:
-        await ctx.send("❌ Você não pode mutar um usuário com cargo superior ao seu!")
+        awaitctx.reply("❌ Você não pode mutar um usuário com cargo superior ao seu!")
         return
     # Parse duration
     time_units = {"m": 60, "h": 3600, "d": 86400}
@@ -1459,11 +1621,11 @@ async def mutar(ctx, member: discord.Member, duration: str = "10m", *, reason="N
             description=f"**{member.display_name}** foi mutado por {duration}.\n**Motivo:** {reason}",
             color=discord.Color.red()
         )
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
     except discord.Forbidden:
-        await ctx.send("❌ Não tenho permissão para mutar este usuário.")
+        awaitctx.reply("❌ Não tenho permissão para mutar este usuário.")
     except Exception as e:
-        await ctx.send(f"❌ Erro ao mutar usuário: {e}")
+        awaitctx.reply(f"❌ Erro ao mutar usuário: {e}")
 
 @bot.command(name='desmutar', aliases=['unmute'])
 @commands.has_permissions(manage_messages=True)
@@ -1477,11 +1639,11 @@ async def desmutar(ctx, member: discord.Member):
             description=f"**{member.display_name}** foi desmutado.",
             color=discord.Color.green()
         )
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
     except discord.Forbidden:
-        await ctx.send("❌ Não tenho permissão para desmutar este usuário.")
+        awaitctx.reply("❌ Não tenho permissão para desmutar este usuário.")
     except Exception as e:
-        await ctx.send(f"❌ Erro ao desmutar usuário: {e}")
+        awaitctx.reply(f"❌ Erro ao desmutar usuário: {e}")
 
 @bot.command(name='avisar', aliases=['warn'])
 @commands.has_permissions(manage_messages=True)
@@ -1494,7 +1656,7 @@ async def avisar(ctx, member: discord.Member, *, reason):
         description=f"**{member.display_name}** recebeu um aviso.\n**Motivo:** {reason}\n**Total de avisos:** {len(warns)}",
         color=discord.Color.yellow()
     )
-    await ctx.send(embed=embed)
+    awaitctx.reply(embed=embed)
 
 @bot.command(name='avisos', aliases=['warnings'])
 async def avisos(ctx, member: discord.Member = None):
@@ -1517,13 +1679,13 @@ async def avisos(ctx, member: discord.Member = None):
             date = datetime.fromisoformat(warn_time).strftime("%d/%m/%Y %H:%M")
             embed.add_field(name=f"Aviso #{i}", value=f"**Motivo:** {reason}\n**Data:** {date}", inline=False)
 
-    await ctx.send(embed=embed)
+    awaitctx.reply(embed=embed)
 
 @bot.command(name='limpar', aliases=['clear'])
 @commands.has_permissions(manage_messages=True)
 async def limpar(ctx, amount: int):
     if amount <= 0 or amount > 100:
-        await ctx.send("❌ A quantidade deve ser entre 1 e 100.")
+        awaitctx.reply("❌ A quantidade deve ser entre 1 e 100.")
         return
 
     try:
@@ -1533,11 +1695,11 @@ async def limpar(ctx, amount: int):
             description=f"Foram deletadas {len(deleted) - 1} mensagens.",
             color=discord.Color.green()
         )
-        msg = await ctx.send(embed=embed)
+        msg = awaitctx.reply(embed=embed)
         await asyncio.sleep(3)
         await msg.delete()
     except discord.Forbidden:
-        await ctx.send("❌ Não tenho permissão para deletar mensagens.")
+        awaitctx.reply("❌ Não tenho permissão para deletar mensagens.")
 
 # --- Comandos de Diversão ---
 @bot.command(name='roll')
@@ -1609,7 +1771,7 @@ async def avatar(ctx, member: discord.Member = None):
         color=discord.Color.blue()
     )
     embed.set_image(url=target.display_avatar.url)
-    await ctx.send(embed=embed)
+    awaitctx.reply(embed=embed)
 
 @bot.command(name='banner')
 async def banner(ctx, member: discord.Member = None):
@@ -1629,7 +1791,7 @@ async def banner(ctx, member: discord.Member = None):
             color=discord.Color.red()
         )
 
-    await ctx.send(embed=embed)
+    awaitctx.reply(embed=embed)
 
 @bot.command(name='coinflip')
 async def coinflip(ctx):
@@ -1657,9 +1819,9 @@ async def clima(ctx, *, cidade):
             description=f"**Temperatura:** {temp}°C\n**Condição:** {condition}\n**Umidade:** {humidity}%",
             color=discord.Color.blue()
         )
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
     except Exception as e:
-        await ctx.send(f"❌ Erro ao obter informações do clima: {e}")
+        awaitctx.reply(f"❌ Erro ao obter informações do clima: {e}")
 
 @bot.command(name='traduzir')
 async def traduzir(ctx, *, texto):
@@ -1670,9 +1832,9 @@ async def traduzir(ctx, *, texto):
             description=f"**Original ({translated.src}):** {texto}\n**Tradução (pt):** {translated.text}",
             color=discord.Color.green()
         )
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
     except Exception as e:
-        await ctx.send(f"❌ Erro ao traduzir: {e}")
+        awaitctx.reply(f"❌ Erro ao traduzir: {e}")
 
 # --- Comandos Utilitários ---
 @bot.command(name='perfil', aliases=['userinfo'])
@@ -1692,7 +1854,7 @@ async def perfil(ctx, member: discord.Member = None):
     embed.add_field(name="🏷️ Cargos", value=f"{len(target.roles) - 1} cargos", inline=True)
     embed.add_field(name="🤖 Bot?", value="Sim" if target.bot else "Não", inline=True)
 
-    await ctx.send(embed=embed)
+    awaitctx.reply(embed=embed)
 
 @bot.command(name='serverinfo')
 async def serverinfo(ctx):
@@ -1715,7 +1877,7 @@ async def serverinfo(ctx):
     embed.add_field(name="📅 Criado em", value=guild.created_at.strftime("%d/%m/%Y"), inline=True)
     embed.add_field(name="🔒 Nível de Verificação", value=str(guild.verification_level).title(), inline=True)
 
-    await ctx.send(embed=embed)
+    awaitctx.reply(embed=embed)
 
 @bot.command(name='uptime')
 async def uptime(ctx):
@@ -1729,7 +1891,7 @@ async def uptime(ctx):
         description=f"O bot está online há: **{days}d {hours}h {minutes}m {seconds}s**",
         color=discord.Color.green()
     )
-    await ctx.send(embed=embed)
+    awaitctx.reply(embed=embed)
 
 @bot.command(name='lembrete')
 async def lembrete(ctx, tempo, *, texto):
@@ -1739,7 +1901,7 @@ async def lembrete(ctx, tempo, *, texto):
         if tempo[-1] in time_units:
             duration = int(tempo[:-1]) * time_units[tempo[-1]]
         else:
-            await ctx.send("❌ Formato de tempo inválido. Use: 10m, 2h, 1d")
+            awaitctx.reply("❌ Formato de tempo inválido. Use: 10m, 2h, 1d")
             return
 
         reminder_time = (datetime.now() + timedelta(seconds=duration)).isoformat()
@@ -1750,7 +1912,7 @@ async def lembrete(ctx, tempo, *, texto):
             description=f"Lembrete criado para daqui a {tempo}: {texto}",
             color=discord.Color.green()
         )
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
 
         # Wait and send reminder
         await asyncio.sleep(duration)
@@ -1760,12 +1922,12 @@ async def lembrete(ctx, tempo, *, texto):
             description=f"{ctx.author.mention} {texto}",
             color=discord.Color.yellow()
         )
-        await ctx.send(embed=remind_embed)
+        awaitctx.reply(embed=remind_embed)
 
     except ValueError:
-        await ctx.send("❌ Formato de tempo inválido.")
+        awaitctx.reply("❌ Formato de tempo inválido.")
     except Exception as e:
-        await ctx.send(f"❌ Erro ao criar lembrete: {e}")
+        awaitctx.reply(f"❌ Erro ao criar lembrete: {e}")
 
 @bot.command(name='calc')
 async def calc(ctx, *, expression):
@@ -1773,7 +1935,7 @@ async def calc(ctx, *, expression):
         # Basic calculator - only allow safe operations
         allowed_chars = "0123456789+-*/.() "
         if not all(c in allowed_chars for c in expression):
-            await ctx.send("❌ Expressão contém caracteres não permitidos.")
+            awaitctx.reply("❌ Expressão contém caracteres não permitidos.")
             return
 
         result = eval(expression)
@@ -1782,11 +1944,11 @@ async def calc(ctx, *, expression):
             description=f"**Expressão:** {expression}\n**Resultado:** {result}",
             color=discord.Color.blue()
         )
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
     except ZeroDivisionError:
-        await ctx.send("❌ Divisão por zero não é permitida.")
+        awaitctx.reply("❌ Divisão por zero não é permitida.")
     except Exception as e:
-        await ctx.send(f"❌ Erro na expressão: {e}")
+        awaitctx.reply(f"❌ Erro na expressão: {e}")
 
 # --- Comandos de Carreira e Rolls ---
 @bot.command(name='carreira', aliases=['career'])
@@ -1797,11 +1959,11 @@ async def carreira_command(ctx, member: discord.Member = None):
     embed = gerar_embed_carreira(target_user, dados_usuarios[target_user.id])
 
     if target_user.id == ctx.author.id:
-        message = await ctx.send(embed=embed)
+        message = awaitctx.reply(embed=embed)
         dados_usuarios[target_user.id]['carreira_message_id'] = message.id
         dados_usuarios[target_user.id]['carreira_channel_id'] = ctx.channel.id
     else:
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
 
 @bot.command(name='alterar', aliases=['alter', 'change'])
 async def alterar(ctx, campo: str, *, valor):
@@ -1828,14 +1990,14 @@ async def alterar(ctx, campo: str, *, valor):
                 description=f"Campo `{campo_original}` não reconhecido. Você quis dizer `{campo_detectado}`? Ajustando para `{campo_detectado}`.",
                 color=discord.Color.orange()
             )
-            await ctx.send(embed=embed)
+            awaitctx.reply(embed=embed)
         else:
             embed = discord.Embed(
                 title="❌ Campo Inválido",
                 description=f"Campo `{campo_original}` não reconhecido. Por favor, verifique a ortografia. Campos válidos para carreira incluem: {', '.join(campos_validos_alterar_carreira[:5])}...",
                 color=discord.Color.red()
             )
-            await ctx.send(embed=embed)
+            awaitctx.reply(embed=embed)
             return
     else:
         embed = discord.Embed(
@@ -1843,7 +2005,7 @@ async def alterar(ctx, campo: str, *, valor):
             description=f"Campo `{campo_original}` não reconhecido. Por favor, verifique a ortografia. Campos válidos para carreira incluem: {', '.join(campos_validos_alterar_carreira[:5])}...",
             color=discord.Color.red()
         )
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
         return
 
     if campo_detectado is None:
@@ -1852,7 +2014,7 @@ async def alterar(ctx, campo: str, *, valor):
             description=f"Ocorreu um erro ao processar o campo `{campo_original}`. Tente novamente ou use um campo válido.",
             color=discord.Color.red()
         )
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
         return
 
     if campo_convertido in campos_numericos_carreira:
@@ -1862,7 +2024,7 @@ async def alterar(ctx, campo: str, *, valor):
                 description="Este campo aceita apenas números.",
                 color=discord.Color.red()
             )
-            await ctx.send(embed=embed)
+            awaitctx.reply(embed=embed)
             return
         valor = int(valor)
     elif campo_convertido in ["nome", "nacionalidade", "clube", "posicao"]:
@@ -1875,7 +2037,7 @@ async def alterar(ctx, campo: str, *, valor):
         description=f"Campo `{campo_detectado}` atualizado para: `{valor}`",
         color=discord.Color.green()
     )
-    await ctx.send(embed=embed)
+    awaitctx.reply(embed=embed)
 
     if 'carreira_message_id' in dados_usuarios[user.id] and 'carreira_channel_id' in dados_usuarios[user.id]:
         try:
@@ -1907,11 +2069,11 @@ async def rolls_command(ctx, member: discord.Member = None):
     embed = gerar_embed_rolls(target_user, dados_rolls[target_user.id], is_own_rolls)
 
     if is_own_rolls:
-        message = await ctx.send(embed=embed)
+        message = awaitctx.reply(embed=embed)
         dados_rolls[target_user.id]['rolls_message_id'] = message.id
         dados_rolls[target_user.id]['rolls_channel_id'] = ctx.channel.id
     else:
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
 
 @bot.command(name='editar', aliases=['edit'])
 async def editar_roll(ctx, roll_name: str, *, value: str):
@@ -1922,7 +2084,7 @@ async def editar_roll(ctx, roll_name: str, *, value: str):
             description="Você ainda não tem rolls definidos! Use `p!rolls` para ver seus rolls e inicializá-los.",
             color=discord.Color.blue()
         )
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
         return
 
     roll_original_input = roll_name
@@ -1944,14 +2106,14 @@ async def editar_roll(ctx, roll_name: str, *, value: str):
                 description=f"Roll `{roll_original_input}` não reconhecido. Você quis dizer `{roll_detectado}`? Ajustando para `{roll_detectado}`.",
                 color=discord.Color.orange()
             )
-            await ctx.send(embed=embed)
+            awaitctx.reply(embed=embed)
         else:
             embed = discord.Embed(
                 title="❌ Roll Inválido",
                 description=f"Roll `{roll_original_input}` não reconhecido. Por favor, verifique a ortografia. Rolls válidos incluem: {', '.join(campos_validos_rolls[:5])}...",
                 color=discord.Color.red()
             )
-            await ctx.send(embed=embed)
+            awaitctx.reply(embed=embed)
             return
     else:
         embed = discord.Embed(
@@ -1959,7 +2121,7 @@ async def editar_roll(ctx, roll_name: str, *, value: str):
             description=f"Roll `{roll_original_input}` não reconhecido. Por favor, verifique a ortografia. Rolls válidos incluem: {', '.join(campos_validos_rolls[:5])}...",
             color=discord.Color.red()
         )
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
         return
 
     if roll_detectado is None:
@@ -1968,7 +2130,7 @@ async def editar_roll(ctx, roll_name: str, *, value: str):
             description=f"Ocorreu um erro ao processar o roll `{roll_original_input}`. Tente novamente ou use um roll válido.",
             color=discord.Color.red()
         )
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
         return
 
     if roll_convertido == "lancamento":
@@ -1979,7 +2141,7 @@ async def editar_roll(ctx, roll_name: str, *, value: str):
             description="Para este roll, o valor deve ser um **número**.",
             color=discord.Color.red()
         )
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
         return
     else:
         dados_rolls[user.id][roll_convertido] = int(value)
@@ -1989,7 +2151,7 @@ async def editar_roll(ctx, roll_name: str, *, value: str):
         description=f"Roll `{roll_detectado}` atualizado para: `{value}`",
         color=discord.Color.green()
     )
-    await ctx.send(embed=embed)
+    awaitctx.reply(embed=embed)
 
     if 'rolls_message_id' in dados_rolls[user.id] and 'rolls_channel_id' in dados_rolls[user.id]:
         try:
@@ -2045,7 +2207,7 @@ async def adicionar_tarefa(ctx, *, task_name: str):
         description=f"Tarefa **'{task_name}'** adicionada com sucesso.",
         color=discord.Color.green()
     )
-    await ctx.send(embed=embed)
+    awaitctx.reply(embed=embed)
 
 @bot.command(name='tarefas', aliases=['tasks'])
 async def listar_tarefas(ctx):
@@ -2056,7 +2218,7 @@ async def listar_tarefas(ctx):
             description="Você não tem nenhuma tarefa pendente.",
             color=discord.Color.light_grey()
         )
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
         return
 
     embed = discord.Embed(title="📋 Suas Tarefas", color=discord.Color.purple())
@@ -2064,7 +2226,7 @@ async def listar_tarefas(ctx):
         status = "✅ Concluída" if completed else "⏳ Pendente"
         embed.add_field(name=f"ID: {task_id}", value=f"**{name}** - {status}", inline=False)
 
-    await ctx.send(embed=embed)
+    awaitctx.reply(embed=embed)
 
 @bot.command(name='completetask', aliases=['complete'])
 async def complete_task(ctx, task_id: int):
@@ -2074,14 +2236,14 @@ async def complete_task(ctx, task_id: int):
             description=f"Tarefa com ID `{task_id}` marcada como concluída!",
             color=discord.Color.green()
         )
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
     else:
         embed = discord.Embed(
             title="❌ Erro ao Concluir Tarefa",
             description=f"Não encontrei uma tarefa com o ID `{task_id}` ou ela já está concluída.",
             color=discord.Color.red()
         )
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
 
 @bot.command(name='deletetask', aliases=['deltask'])
 async def delete_task(ctx, task_id: int):
@@ -2091,14 +2253,14 @@ async def delete_task(ctx, task_id: int):
             description=f"Tarefa com ID `{task_id}` foi removida com sucesso.",
             color=discord.Color.dark_red()
         )
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
     else:
         embed = discord.Embed(
             title="❌ Erro ao Remover Tarefa",
             description=f"Não encontrei uma tarefa com o ID `{task_id}` para remover.",
             color=discord.Color.red()
         )
-        await ctx.send(embed=embed)
+        awaitctx.reply(embed=embed)
 
 # --- Modal para p!resultado ---
 class ResultadoModal(Modal, title="⚽ Registrar Resultado da Partida"):
@@ -2108,9 +2270,10 @@ class ResultadoModal(Modal, title="⚽ Registrar Resultado da Partida"):
     gols_visitante = TextInput(label="Gols do Time Visitante", placeholder="Ex: 1", max_length=2, style=discord.TextStyle.short)
     estadio = TextInput(label="Estádio da Partida", placeholder="Ex: Maracanã", max_length=100)
 
-    def __init__(self, interaction):
+    def __init__(self, interaction, resultado_view=None):
         super().__init__()
         self.interaction = interaction
+        self.resultado_view = resultado_view
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -2125,7 +2288,11 @@ class ResultadoModal(Modal, title="⚽ Registrar Resultado da Partida"):
             'gols_casa': gols_casa_int,
             'time_visitante': capitalizar_nome(self.time_visitante.value),
             'gols_visitante': gols_visitante_int,
-            'estadio': capitalizar_nome(self.estadio.value)
+            'estadio': capitalizar_nome(self.estadio.value),
+            'marcadores_casa': [],
+            'marcadores_visitante': [],
+            'assistencias_casa': [],
+            'assistencias_visitante': []
         }
 
         times_of_day_categories = ["Manhã", "Tarde", "Noite"]
@@ -2168,13 +2335,22 @@ class ResultadoModal(Modal, title="⚽ Registrar Resultado da Partida"):
         ]
         jogo_data['eventos_aleatorios'] = random.sample(other_events, min(len(other_events), 3))
 
+        # Criar embed inicial
+        initial_embed = self.create_resultado_embed(jogo_data)
+
+        # Criar view com botão para adicionar marcadores
+        result_view = ResultadoFinalView(interaction.user.id, jogo_data)
+        
+        await interaction.response.send_message(embed=initial_embed, view=result_view)
+
+    def create_resultado_embed(self, jogo_data):
         vencedor = None
         if jogo_data['gols_casa'] > jogo_data['gols_visitante']:
             vencedor = jogo_data['time_casa']
         elif jogo_data['gols_visitante'] > jogo_data['gols_casa']:
             vencedor = jogo_data['time_visitante']
 
-        final_embed = discord.Embed(
+        embed = discord.Embed(
             title=f"🏁 **Resultado da Partida** 🏁",
             description=f"No estádio **{jogo_data['estadio']}**, a partida foi finalizada!",
             color=discord.Color.teal() if not vencedor else discord.Color.green()
@@ -2189,7 +2365,27 @@ class ResultadoModal(Modal, title="⚽ Registrar Resultado da Partida"):
         else:
             placar_str += f"╰▸ ‹ 🤝 › ৎ˚₊ A partida terminou em **empate**."
 
-        final_embed.add_field(name="⠀", value="﹐ꜜ __‹📋›__ **__P__lacar __F__inal !** __‹📋›__ ꜜ﹐\n" + placar_str, inline=False)
+        embed.add_field(name="⠀", value="﹐ꜜ __‹📋›__ **__P__lacar __F__inal !** __‹📋›__ ꜜ﹐\n" + placar_str, inline=False)
+
+        # Adicionar marcadores e assistências se existirem
+        if (jogo_data['marcadores_casa'] or jogo_data['marcadores_visitante'] or 
+            jogo_data['assistencias_casa'] or jogo_data['assistencias_visitante']):
+            
+            marcadores_str = "﹐ꜜ __‹⚽›__ **__M__arcadores e __A__ssistências !** __‹⚽›__ ꜜ﹐\n"
+            
+            if jogo_data['marcadores_casa']:
+                marcadores_str += f"╰▸ ‹ 🏠 › ৎ˚₊ **Gols {jogo_data['time_casa']}:** {', '.join(jogo_data['marcadores_casa'])}\n"
+            
+            if jogo_data['marcadores_visitante']:
+                marcadores_str += f"╰▸ ‹ ✈️ › ৎ˚₊ **Gols {jogo_data['time_visitante']}:** {', '.join(jogo_data['marcadores_visitante'])}\n"
+            
+            if jogo_data['assistencias_casa']:
+                marcadores_str += f"╰▸ ‹ 🎯 › ৎ˚₊ **Assistências {jogo_data['time_casa']}:** {', '.join(jogo_data['assistencias_casa'])}\n"
+            
+            if jogo_data['assistencias_visitante']:
+                marcadores_str += f"╰▸ ‹ 🎯 › ৎ˚₊ **Assistências {jogo_data['time_visitante']}:** {', '.join(jogo_data['assistencias_visitante'])}\n"
+            
+            embed.add_field(name="⠀", value=marcadores_str, inline=False)
 
         conditions_str = (
             "﹐ꜜ __‹🌐›__ **__C__ondições da __P__artida e __E__ventos !** __‹🌐›__ ꜜ﹐\n"
@@ -2200,15 +2396,101 @@ class ResultadoModal(Modal, title="⚽ Registrar Resultado da Partida"):
             f"╰▸ 👨‍⚖️ › ৎ˚₊ **Árbitro:** {jogo_data['arbitro']}\n"
             f"╰▸ ‹ 📣 › ৎ˚₊ **Eventos:**\n" + "\n".join([f"  › {e}" for e in jogo_data['eventos_aleatorios']])
         )
-        final_embed.add_field(name="⠀", value=conditions_str, inline=False)
+        embed.add_field(name="⠀", value=conditions_str, inline=False)
 
-        final_embed.set_footer(text=f"Partida registrada por: {interaction.user.display_name} - Dev: YevgennyMXP")
-        final_embed.timestamp = discord.utils.utcnow()
+        embed.set_footer(text=f"Partida registrada por: {jogo_data.get('registered_by', 'Sistema')} - Dev: YevgennyMXP")
+        embed.timestamp = discord.utils.utcnow()
 
-        if interaction.guild and interaction.guild.icon:
-            final_embed.set_thumbnail(url=interaction.guild.icon.url)
+        return embed
 
-        await interaction.response.send_message(embed=final_embed)
+class MarcadoresModal(Modal, title="⚽ Adicionar Marcadores e Assistências"):
+    marcadores_casa = TextInput(
+        label="Marcadores (Casa)", 
+        placeholder="Ex: João - 2 gols, Pedro - 1 gol",
+        max_length=200,
+        required=False,
+        style=discord.TextStyle.paragraph
+    )
+    marcadores_visitante = TextInput(
+        label="Marcadores (Visitante)", 
+        placeholder="Ex: Silva - 1 gol, Santos - 1 gol",
+        max_length=200,
+        required=False,
+        style=discord.TextStyle.paragraph
+    )
+    assistencias_casa = TextInput(
+        label="Assistências (Casa)", 
+        placeholder="Ex: Carlos - 2 assists, André - 1 assist",
+        max_length=200,
+        required=False,
+        style=discord.TextStyle.paragraph
+    )
+    assistencias_visitante = TextInput(
+        label="Assistências (Visitante)", 
+        placeholder="Ex: Oliveira - 1 assist, Costa - 1 assist",
+        max_length=200,
+        required=False,
+        style=discord.TextStyle.paragraph
+    )
+
+    def __init__(self, jogo_data, resultado_view):
+        super().__init__()
+        self.jogo_data = jogo_data
+        self.resultado_view = resultado_view
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # Processar marcadores e assistências
+        if self.marcadores_casa.value:
+            self.jogo_data['marcadores_casa'] = [x.strip() for x in self.marcadores_casa.value.split(',') if x.strip()]
+        
+        if self.marcadores_visitante.value:
+            self.jogo_data['marcadores_visitante'] = [x.strip() for x in self.marcadores_visitante.value.split(',') if x.strip()]
+        
+        if self.assistencias_casa.value:
+            self.jogo_data['assistencias_casa'] = [x.strip() for x in self.assistencias_casa.value.split(',') if x.strip()]
+        
+        if self.assistencias_visitante.value:
+            self.jogo_data['assistencias_visitante'] = [x.strip() for x in self.assistencias_visitante.value.split(',') if x.strip()]
+        
+        # Salvar quem registrou
+        self.jogo_data['registered_by'] = interaction.user.display_name
+
+        # Criar embed atualizado
+        modal_instance = ResultadoModal(interaction)
+        updated_embed = modal_instance.create_resultado_embed(self.jogo_data)
+        
+        # Criar nova view com o botão ainda ativo
+        new_view = ResultadoFinalView(interaction.user.id, self.jogo_data)
+        
+        await interaction.response.edit_message(embed=updated_embed, view=new_view)
+
+class ResultadoFinalView(View):
+    def __init__(self, original_user_id: int, jogo_data: dict):
+        super().__init__(timeout=600)
+        self.original_user_id = original_user_id
+        self.jogo_data = jogo_data
+
+    @discord.ui.button(label="🎯 Marcadores", style=discord.ButtonStyle.success, emoji="⚽")
+    async def add_marcadores(self, interaction: discord.Interaction, button: Button):
+        if interaction.user.id != self.original_user_id:
+            await interaction.response.send_message("❌ Apenas quem executou o comando pode usar esses botões!", ephemeral=True)
+            return
+        
+        modal = MarcadoresModal(self.jogo_data, self)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="✅ Finalizar", style=discord.ButtonStyle.primary)
+    async def finalize_result(self, interaction: discord.Interaction, button: Button):
+        if interaction.user.id != self.original_user_id:
+            await interaction.response.send_message("❌ Apenas quem executou o comando pode usar esses botões!", ephemeral=True)
+            return
+        
+        # Finalizar e remover os botões
+        modal_instance = ResultadoModal(interaction)
+        final_embed = modal_instance.create_resultado_embed(self.jogo_data)
+        final_embed.set_footer(text=f"✅ Resultado finalizado por: {interaction.user.display_name} - Dev: YevgennyMXP")
+        
+        await interaction.response.edit_message(embed=final_embed, view=None)
 
 class ResultadoView(View):
     def __init__(self, original_user_id: int):
@@ -2242,21 +2524,21 @@ async def on_command_error(ctx, error):
             description=f"O comando `{ctx.invoked_with}` não existe. Use `p!ajuda` para ver todos os comandos.",
             color=discord.Color.red()
         )
-        await ctx.send(embed=embed, delete_after=5)
+        awaitctx.reply(embed=embed, delete_after=5)
     elif isinstance(error, commands.MissingPermissions):
         embed = discord.Embed(
             title="❌ Sem Permissão",
             description="Você não tem permissão para usar este comando.",
             color=discord.Color.red()
         )
-        await ctx.send(embed=embed, delete_after=5)
+        awaitctx.reply(embed=embed, delete_after=5)
     elif isinstance(error, commands.MissingRequiredArgument):
         embed = discord.Embed(
             title="❌ Argumento Obrigatório",
             description=f"Você esqueceu de fornecer um argumento obrigatório: `{error.param.name}`",
             color=discord.Color.red()
         )
-        await ctx.send(embed=embed, delete_after=5)
+        awaitctx.reply(embed=embed, delete_after=5)
     else:
         print(f"Erro não tratado: {error}")
 
@@ -2268,7 +2550,7 @@ CLIENT_ID = '1377549020842692728'
 async def invite(ctx):
     permissions = discord.Permissions(administrator=True)  # ou personalize como quiser
     invite_url = discord.utils.oauth_url(client_id=CLIENT_ID, permissions=permissions)
-    await ctx.send(f"🔗 Me adicione no seu servidor com este link:\n{invite_url}")
+    awaitctx.reply(f"🔗 Me adicione no seu servidor com este link:\n{invite_url}")
 
 
 # 1. Comando de Shop/Loja
@@ -3687,258 +3969,7 @@ async def clear_cache(ctx):
     )
     await ctx.reply(embed=embed)
 
-# Atualizar o sistema de ajuda com os novos comandos
-class HelpView(View):
-    def __init__(self, original_user_id: int):
-        super().__init__(timeout=300)
-        self.original_user_id = original_user_id
-
-    def get_main_embed(self):
-        embed = discord.Embed(
-            title="🎯 Central de Comandos - Gyrus Burguer",
-            description="**Bem-vindo ao sistema de ajuda!**\n\nSelecione uma categoria abaixo para ver os comandos disponíveis. Use os botões para navegar entre as diferentes seções.\n\n**✨ Novidade: 30+ Novos Comandos Adicionados!**",
-            color=discord.Color.from_rgb(88, 101, 242)
-        )
-        embed.add_field(
-            name="📱 Como usar",
-            value="• Clique nos botões abaixo para explorar\n• Cada categoria tem comandos específicos\n• Use `p!` antes de cada comando\n• Total: 60+ comandos disponíveis!",
-            inline=False
-        )
-        embed.set_footer(text="💡 Dica: Clique em qualquer categoria para começar! - Dev: YevgennyMXP")
-        return embed
-
-    def get_carreira_embed(self):
-        embed = discord.Embed(
-            title="⚽ Carreira e Rolls",
-            description="Comandos para gerenciar sua carreira de jogador e rolls de habilidades",
-            color=discord.Color.green()
-        )
-        embed.add_field(
-            name="🏆 Comandos de Carreira",
-            value=(
-                "`p!carreira [@usuário]` - Ver carreira completa\n"
-                "`p!alterar <campo> <valor>` - Alterar dados da carreira\n"
-                "`p!ranking` - Rankings dos melhores jogadores\n"
-                "`p!simular <time1> <time2>` - Simular partida entre times"
-            ),
-            inline=False
-        )
-        embed.add_field(
-            name="🎲 Comandos de Rolls",
-            value=(
-                "`p!rolls [@usuário]` - Ver rolls de habilidades\n"
-                "`p!editar <roll> <valor>` - Editar seus rolls"
-            ),
-            inline=False
-        )
-        return embed
-
-    def get_economia_embed(self):
-        embed = discord.Embed(
-            title="💰 Sistema de Economia",
-            description="Ganhe, gaste e invista suas moedas no servidor!",
-            color=discord.Color.gold()
-        )
-        embed.add_field(
-            name="💵 Gerenciamento",
-            value=(
-                "`p!money [@usuário]` - Ver saldo atual\n"
-                "`p!pay <@usuário> <valor>` - Transferir dinheiro\n"
-                "`p!ranking_money` - Ranking dos mais ricos\n"
-                "`p!shop` - Ver loja de itens\n"
-                "`p!buy <item>` - Comprar item da loja"
-            ),
-            inline=False
-        )
-        embed.add_field(
-            name="💼 Ganhar Dinheiro",
-            value=(
-                "`p!daily` - Bônus diário (100-300 moedas)\n"
-                "`p!work` - Trabalhar por dinheiro (cooldown 1h)\n"
-                "`p!steal <@usuário>` - Tentar roubar (arriscado!)"
-            ),
-            inline=False
-        )
-        embed.add_field(
-            name="🎰 Jogos e Investimentos",
-            value=(
-                "`p!apostar <valor>` - Fortune Tiger (caça-níqueis)\n"
-                "`p!investir <valor>` - Investir em ações e crypto\n"
-                "`p!duel <@usuário> [aposta]` - Duelar por moedas\n"
-                "`p!guess` - Jogo de adivinhação com prêmios\n"
-                "`p!odd` - Apostar no placar exato de partidas (2x ganho)\n"
-                "`p!historico_apostas` - Ver histórico de apostas"
-            ),
-            inline=False
-        )
-        return embed
-
-    def get_moderacao_embed(self):
-        embed = discord.Embed(
-            title="🛠️ Ferramentas de Moderação",
-            description="Comandos para moderadores manterem a ordem no servidor",
-            color=discord.Color.red()
-        )
-        embed.add_field(
-            name="🔨 Punições",
-            value=(
-                "`p!ban <@usuário> [motivo]` - Banir permanentemente\n"
-                "`p!kick <@usuário> [motivo]` - Expulsar do servidor\n"
-                "`p!mute <@usuário> [tempo] [motivo]` - Silenciar temporariamente"
-            ),
-            inline=False
-        )
-        embed.add_field(
-            name="⚠️ Avisos e Controle",
-            value=(
-                "`p!warn <@usuário> <motivo>` - Dar aviso formal\n"
-                "`p!warnings [@usuário]` - Ver histórico de avisos\n"
-                "`p!unmute <@usuário>` - Remover silenciamento\n"
-                "`p!react <id_msg> <emoji>` - Reagir a mensagem"
-            ),
-            inline=False
-        )
-        embed.add_field(
-            name="🧹 Limpeza e Admin",
-            value=(
-                "`p!clear <quantidade>` - Limpar mensagens (máx: 100)\n"
-                "`p!resultado` - Registrar resultado de partidas\n"
-                "`p!backup` - Fazer backup dos dados (admin)\n"
-                "`p!clearcache` - Limpar cache do bot (admin)"
-            ),
-            inline=False
-        )
-        return embed
-
-    def get_diversao_embed(self):
-        embed = discord.Embed(
-            title="🎮 Comandos de Diversão",
-            description="Entretenimento e funcionalidades divertidas para todos!",
-            color=discord.Color.purple()
-        )
-        embed.add_field(
-            name="🎲 Jogos e Sorte",
-            value=(
-                "`p!roll [lados]` - Rolar dado (padrão: 6 lados)\n"
-                "`p!customroll <XdY>` - Dados personalizados (ex: 3d6)\n"
-                "`p!coinflip` - Cara ou coroa clássico\n"
-                "`p!8ball <pergunta>` - Bola mágica 8\n"
-                "`p!luck` - Medidor de sorte do dia\n"
-                "`p!random [min] [max]` - Número aleatório"
-            ),
-            inline=False
-        )
-        embed.add_field(
-            name="🖼️ Perfil e Social",
-            value=(
-                "`p!avatar [@usuário]` - Mostrar avatar em alta qualidade\n"
-                "`p!banner [@usuário]` - Mostrar banner do perfil\n"
-                "`p!color <cor>` - Escolher cor do perfil\n"
-                "`p!level [@usuário]` - Ver nível e XP\n"
-                "`p!ranking_level` - Ranking de níveis"
-            ),
-            inline=False
-        )
-        embed.add_field(
-            name="🎨 Diversos",
-            value=(
-                "`p!meme` - Meme aleatório\n"
-                "`p!quote` - Citação inspiradora\n"
-                "`p!inspire` - Inspiração do dia\n"
-                "`p!word` - Palavra do dia (futebol)\n"
-                "`p!emoji <emoji>` - Info sobre emoji"
-            ),
-            inline=False
-        )
-        return embed
-
-    def get_utilitarios_embed(self):
-        embed = discord.Embed(
-            title="📋 Utilitários e Informações",
-            description="Ferramentas úteis para organização e informações do servidor",
-            color=discord.Color.blue()
-        )
-        embed.add_field(
-            name="👥 Informações",
-            value=(
-                "`p!userinfo [@usuário]` - Perfil detalhado do usuário\n"
-                "`p!serverinfo` - Estatísticas completas do servidor\n"
-                "`p!botstats` - Estatísticas do bot\n"
-                "`p!topemojis` - Top emojis do servidor"
-            ),
-            inline=False
-        )
-        embed.add_field(
-            name="📝 Sistema de Tarefas",
-            value=(
-                "`p!tasks` - Ver suas tarefas pendentes\n"
-                "`p!addtask <descrição>` - Adicionar nova tarefa\n"
-                "`p!completetask <id>` - Marcar como concluída\n"
-                "`p!deletetask <id>` - Remover tarefa"
-            ),
-            inline=False
-        )
-        embed.add_field(
-            name="⚡ Ferramentas Diversas",
-            value=(
-                "`p!ping` - Verificar latência avançada\n"
-                "`p!uptime` - Tempo online do bot\n"
-                "`p!lembrete <tempo> <texto>` - Criar lembrete\n"
-                "`p!calc <expressão>` - Calculadora matemática\n"
-                "`p!countdown <segundos>` - Timer/cronômetro\n"
-                "`p!age <ano> [mês] [dia]` - Calcular idade\n"
-                "`p!password [tamanho]` - Gerar senha segura\n"
-                "`p!qr <texto>` - Informações sobre QR code\n"
-                "`p!poll <pergunta> <opção1> <opção2>...` - Criar enquete\n"
-                "`p!clima <cidade>` - Previsão do tempo\n"
-                "`p!traduzir <texto>` - Tradutor automático\n"
-                "`p!feedback <mensagem>` - Enviar feedback"
-            ),
-            inline=False
-        )
-        return embed
-
-    @discord.ui.button(label="🏠 Início", style=discord.ButtonStyle.primary, row=0)
-    async def home_button(self, interaction: discord.Interaction, button: Button):
-        if interaction.user.id != self.original_user_id:
-            await interaction.response.send_message("❌ Apenas quem executou o comando pode usar esses botões!", ephemeral=True)
-            return
-        await interaction.response.edit_message(embed=self.get_main_embed(), view=self)
-
-    @discord.ui.button(label="⚽ Carreira", style=discord.ButtonStyle.success, row=0)
-    async def carreira_button(self, interaction: discord.Interaction, button: Button):
-        if interaction.user.id != self.original_user_id:
-            await interaction.response.send_message("❌ Apenas quem executou o comando pode usar esses botões!", ephemeral=True)
-            return
-        await interaction.response.edit_message(embed=self.get_carreira_embed(), view=self)
-
-    @discord.ui.button(label="💰 Economia", style=discord.ButtonStyle.success, row=0)
-    async def economia_button(self, interaction: discord.Interaction, button: Button):
-        if interaction.user.id != self.original_user_id:
-            await interaction.response.send_message("❌ Apenas quem executou o comando pode usar esses botões!", ephemeral=True)
-            return
-        await interaction.response.edit_message(embed=self.get_economia_embed(), view=self)
-
-    @discord.ui.button(label="🛠️ Moderação", style=discord.ButtonStyle.danger, row=1)
-    async def moderacao_button(self, interaction: discord.Interaction, button: Button):
-        if interaction.user.id != self.original_user_id:
-            await interaction.response.send_message("❌ Apenas quem executou o comando pode usar esses botões!", ephemeral=True)
-            return
-        await interaction.response.edit_message(embed=self.get_moderacao_embed(), view=self)
-
-    @discord.ui.button(label="🎮 Diversão", style=discord.ButtonStyle.secondary, row=1)
-    async def diversao_button(self, interaction: discord.Interaction, button: Button):
-        if interaction.user.id != self.original_user_id:
-            await interaction.response.send_message("❌ Apenas quem executou o comando pode usar esses botões!", ephemeral=True)
-            return
-        await interaction.response.edit_message(embed=self.get_diversao_embed(), view=self)
-
-    @discord.ui.button(label="📋 Utilitários", style=discord.ButtonStyle.secondary, row=1)
-    async def utilitarios_button(self, interaction: discord.Interaction, button: Button):
-        if interaction.user.id != self.original_user_id:
-            await interaction.response.send_message("❌ Apenas quem executou o comando pode usar esses botões!", ephemeral=True)
-            return
-        await interaction.response.edit_message(embed=self.get_utilitarios_embed(), view=self)
+# Sistema de ajuda atualizado (versão única)
 
 # Adicionar XP automaticamente em mensagens
 @bot.event
@@ -4520,6 +4551,2137 @@ async def historico_apostas_command(ctx):
     embed_historico.set_footer(text=f"Use p!odd para fazer uma nova aposta! - Dev: YevgennyMXP")
 
     await ctx.reply(embed=embed_historico)
+
+# --- Sistema de Boxes com Roleta ---
+
+# Definir todas as recompensas para cada tipo de box
+BOX_REWARDS = {
+    "comum": [
+        "1x Auto-Claim",
+        "1x Kit Apelativo", 
+        "2 Rolls pra distribuição",
+        "1x Máscara",
+        "2x Kits Médicos",
+        "1x Naturalização",
+        "3 Rolls pra distribuição",
+        "1 Roll pra distribuição",
+        "1x Box Épica",
+        "100 mil no UnB",
+        "5 milhões de verba pro seu clube",
+        "50 mil no UnB",
+        "+1 Roll de fintas",
+        "+2 Rolls de fintas",
+        "+1 Roll de promessa"
+    ],
+    "epica": [
+        "2x Auto-Claim",
+        "1x Habilidade Comum",
+        "4 Rolls para distribuição",
+        "30 Milhões de verba para seu clube",
+        "300 mil no UnB",
+        "1x Melhoria grátis",
+        "+1 Roll em polaridade",
+        "+3 Rolls de finta",
+        "+2 rolls em perna boa",
+        "500 mil no UnB",
+        "50 milhões de verba",
+        "2x Habilidades Comuns",
+        "1x Slot de Habilidade Comum",
+        "1x Rescisão extra",
+        "2x Kits Apelativos",
+        "1x Naturalização",
+        "Vip Neo gratuito"
+    ],
+    "master": [
+        "1x Slot de festiva extra",
+        "1x Slot de Habilidade Comum",
+        "1x Alteração de Festiva",
+        "3x Itens de Naturalização",
+        "5 Estrelas de Fintas direto",
+        "Promessa Direto",
+        "Vip Deluxe grátis",
+        "Três Box's comuns",
+        "80 milhões de verbas pro seu clube",
+        "5 milhões no UnB",
+        "7 milhões no UnB",
+        "1 box épica",
+        "5 Rolls pra distribuição",
+        "3 Rolls pra distribuição",
+        "3x melhorias grátis a escolha",
+        "2 Box's Épicas",
+        "Vip Supreme grátis",
+        "3x Auto-claim",
+        "4x Auto-claim",
+        "7 Rolls pra distribuição",
+        "nada"
+    ],
+    "itens": [
+        "1x Slot de festiva",
+        "2x Kits Médicos",
+        "3x Kits Médicos",
+        "1x Kit apelativo",
+        "2x Kits Apelativos",
+        "1x Item de Rescisão Extra",
+        "2x Itens de Rescisão Extra",
+        "1x Reset de Ficha",
+        "2x Reset de Ficha",
+        "1x Slot de Habilidade Comum",
+        "1x Alteração de Festiva",
+        "2x Alterações de Rolls",
+        "3x Alterações de Rolls",
+        "1x Item de Naturalização",
+        "2x Itens de Naturalização",
+        "3x Itens de Naturalização",
+        "1x Chuteira",
+        "2x Máscaras",
+        "3x Máscaras",
+        "1x Luvas"
+    ],
+    "festivas": [
+        "Habilidade festiva \"Indiferente\"",
+        "Habilidade festiva \"Velocista\"",
+        "Habilidade festiva \"Clone\"",
+        "Habilidade festiva \"O imperador\"",
+        "Habilidade festiva \"Momentâneo\"",
+        "Habilidade festiva \"Talismã\"",
+        "Habilidade festiva \"Visionário\"",
+        "Nada",
+        "Nada",
+        "Nada",
+        "Nada"
+    ],
+    "exclusivas": [
+        "Habilidade exclusiva \"Domínio Marcelo\"",
+        "Habilidade exclusiva \"Decisivo Ronaldo\"",
+        "Habilidade exclusiva \"Lançamento Alisson\"",
+        "Habilidade exclusiva \"Enfiada Toni Kroos\"",
+        "Habilidade exclusiva \"Dribles Vini Jr\"",
+        "Habilidade exclusiva \"Fatiada Beckham\"",
+        "Habilidade exclusiva \"Armação Léo Ortiz\"",
+        "Habilidade exclusiva \"Defesa Neuer\"",
+        "Habilidade exclusiva \"Rei dos clássicos Yuri Alberto\"",
+        "Habilidade exclusiva \"Cabeceio Magalhães\"",
+        "Habilidade exclusiva \"Di Magia\"",
+        "Habilidade exclusiva \"Maestria Garro\"",
+        "Habilidade exclusiva \"Fôlego Hulk\"",
+        "Habilidade exclusiva \"Chapada Couto\"",
+        "Habilidade exclusiva \"Crucial Van Dijk\"",
+        "Habilidade exclusiva \"Reflexos Jhon\"",
+        "Habilidade exclusiva \"Rabisca Neymar\"",
+        "Habilidade exclusiva \"Interceptação Casemiro\"",
+        "Habilidade exclusiva \"Magia Estêvão\"",
+        "Habilidade exclusiva \"Escape Wirtz\"",
+        "Habilidade exclusiva \"Batida Romário\"",
+        "Habilidade exclusiva \"Ganso é 10\"",
+        "Habilidade exclusiva \"Maestria Alan Patrick\"",
+        "Habilidade exclusiva \"Precisão Maldini\"",
+        "Habilidade exclusiva \"Frieza Palmer\"",
+        "Habilidade exclusiva \"Escanteio Arnold\"",
+        "Habilidade exclusiva \"Visão Ødegaard\"",
+        "Habilidade exclusiva \"Estrela Endrick\"",
+        "Habilidade exclusiva \"Elasticidade Buffon\"",
+        "Habilidade exclusiva \"Defensiva Ramos\"",
+        "Habilidade exclusiva \"Diretas Messi\"",
+        "Habilidade exclusiva \"Mágico Bruno Fernandes\"",
+        "Habilidade exclusiva \"Efeito Suarez\""
+    ]
+}
+
+# URL da thumbnail para todas as boxes
+BOX_THUMBNAIL_URL = "https://cdn.discordapp.com/attachments/1384353085702541403/1385633227116511272/download_39.jpeg?ex=6856c701&is=68557581&hm=419e0668d236a5a6d17ba1b3829738ea0f094e73ad009e7f8287d6274bf9b3b9&"
+
+# URLs específicas para cada tipo de box
+BOX_IMAGES = {
+    "comum": "https://media.discordapp.net/attachments/1375957371121045605/1385643432705261798/Leo_MESSI_10.jpeg?ex=6856d082&is=68557f02&hm=8f29444eb904da0a082925d0cb798c5558c57d1952bb383cd326509ec633be02&=&format=webp",
+    "epica": "https://cdn.discordapp.com/attachments/1375957371121045605/1385643124902203554/bukayo_saka.jpeg?ex=6856d038&is=68557eb8&hm=36ac744b6fc6adb554dc800b2152b627e1f830fd9c9031199645abfb18f947c9&",
+    "master": "https://media.discordapp.net/attachments/1375957371121045605/1385642398658334720/71b5207848947d29968ae9b71dae0b27.jpg?ex=6856cf8b&is=68557e0b&hm=84452fc14fd0bbf68d87c8ff567d3f7afe306f2825d9a3efb50e21dd564a8f97&=&format=webp",
+    "itens": "https://cdn.discordapp.com/attachments/1375957371121045605/1385642794206498916/39a18b6b30d0f59ff885f230abdf4148.jpg?ex=6856cfea&is=68557e6a&hm=73aabfaeb6180410c5790ce88ba4ca4fcb3865bb50c9f85dde7ccb69e2388a16&",
+    "festivas": "https://media.discordapp.net/attachments/1375957371121045605/1385642398880628767/Memphis_Depay_FULL_HD_Wallpaper_made_by_me.jpeg?ex=6856cf8b&is=68557e0b&hm=0614dde8bec4786283e1f8845c1cff7918d183960fa6690aa60f97e49e7c6a79&=&format=webp",
+    "exclusivas": "https://media.discordapp.net/attachments/1375957371121045605/1385642398658334720/71b5207848947d29968ae9b71dae0b27.jpg?ex=6856cf8b&is=68557e0b&hm=84452fc14fd0bbf68d87c8ff567d3f7afe306f2825d9a3efb50e21dd564a8f97&=&format=webp"
+}
+
+# Emojis personalizados para o resultado final
+FINAL_EMOJIS = ""
+
+async def create_box_animation(ctx, box_type: str, box_name: str):
+    """Cria a animação da roleta para qualquer tipo de box"""
+    
+    # Validar se o tipo de box existe
+    if box_type not in BOX_REWARDS:
+        await ctx.reply(f"❌ Tipo de box '{box_type}' não encontrado!")
+        return
+    
+    rewards = BOX_REWARDS[box_type]
+    
+    # Escolher o prêmio final
+    final_reward = random.choice(rewards)
+    
+    # Obter a imagem específica para este tipo de box
+    box_image_url = BOX_IMAGES.get(box_type, BOX_IMAGES["comum"])
+    
+    # Cor aleatória para o embed
+    random_color = discord.Color.from_rgb(
+        random.randint(50, 255),
+        random.randint(50, 255), 
+        random.randint(50, 255)
+    )
+    
+    # Embed inicial
+    initial_embed = discord.Embed(
+        title=f"＋﹒୨🎁୧﹐ᰍ ﹕{box_name}﹒ᜊ",
+        description="**𝅭 ㅤ𝅭ㅤ⎯⎯ㅤִㅤ୨ ✰ ୧ㅤִ ⎯⎯ ㅤ𝅭 ㅤ𝅭**\n\n🎰 **Abrindo box...**\n\n⏳ A roleta está girando...\n\n**𝅭 ㅤ𝅭ㅤ⎯⎯ㅤִㅤ୨ ✰ ୧ㅤִ ⎯⎯ ㅤ𝅭 ㅤ𝅭**",
+        color=random_color
+    )
+    initial_embed.set_thumbnail(url=BOX_THUMBNAIL_URL)
+    initial_embed.set_image(url=box_image_url)
+    initial_embed.set_footer(text=f"Box aberta por {ctx.author.display_name} - Dev: YevgennyMXP")
+    
+    message = await ctx.reply(embed=initial_embed)
+    
+    # Animação da roleta (5 atualizações)
+    for i in range(5):
+        # Escolher um prêmio aleatório para mostrar durante a animação
+        current_reward = random.choice(rewards)
+        
+        animation_embed = discord.Embed(
+            title=f"＋﹒୨🎁୧﹐ᰍ ﹕{box_name}﹒ᜊ",
+            description=f"**𝅭 ㅤ𝅭ㅤ⎯⎯ㅤִㅤ୨ ✰ ୧ㅤִ ⎯⎯ ㅤ𝅭 ㅤ𝅭**\n\n🎰 **Roleta girando...**\n\n🎯 **Prêmio atual:**\n{current_reward}\n\n**⏤͟͟͞▴→ Rotação {i+1}/5**\n\n**𝅭 ㅤ𝅭ㅤ⎯⎯ㅤִㅤ୨ ✰ ୧ㅤִ ⎯⎯ ㅤ𝅭 ㅤ𝅭**",
+            color=random_color
+        )
+        animation_embed.set_thumbnail(url=BOX_THUMBNAIL_URL)
+        animation_embed.set_image(url=box_image_url)
+        animation_embed.set_footer(text=f"Box aberta por {ctx.author.display_name} - Dev: YevgennyMXP")
+        
+        await message.edit(embed=animation_embed)
+        await asyncio.sleep(0.7)
+    
+    # Embed final com o resultado usando o molde fornecido
+    final_embed = discord.Embed(
+        title=f"＋﹒୨🎁୧﹐ᰍ ﹕{box_name}﹒ᜊ",
+        description=f"**𝅭 ㅤ𝅭ㅤ⎯⎯ㅤִㅤ୨ ✰ ୧ㅤִ ⎯⎯ ㅤ𝅭 ㅤ𝅭**\n\n**⏤͟͟͞▴→ {ctx.author.display_name} decidiu abrir uma box! Veja sua recompensa abaixo:**\n\n﹒𑁘🌟೧﹒⊹  **`{final_reward}`**︐﹒୭{FINAL_EMOJIS}\n\n**⏤͟͟͞▴→ Eai?! Teve sorte? Resgate sua recompensa em <#1328480859124142120>!**\n\n**𝅭 ㅤ𝅭ㅤ⎯⎯ㅤִㅤ୨ ✰ ୧ㅤִ ⎯⎯ ㅤ𝅭 ㅤ𝅭**",
+        color=random_color
+    )
+    final_embed.set_thumbnail(url=BOX_THUMBNAIL_URL)
+    final_embed.set_image(url=box_image_url)
+    final_embed.set_footer(text=f"Parabéns {ctx.author.display_name}! - Dev: YevgennyMXP")
+    
+    await message.edit(embed=final_embed)
+
+# Comandos das boxes
+@bot.command(name='box-comum', aliases=['box_comum', 'boxcomum'])
+async def box_comum(ctx):
+    """Abrir uma Box Comum"""
+    await create_box_animation(ctx, "comum", "Box Comum")
+
+@bot.command(name='box-epica', aliases=['box_epica', 'boxepica'])
+async def box_epica(ctx):
+    """Abrir uma Box Épica"""
+    await create_box_animation(ctx, "epica", "Box Épica")
+
+@bot.command(name='box-master', aliases=['box_master', 'boxmaster'])
+async def box_master(ctx):
+    """Abrir uma Box Master"""
+    await create_box_animation(ctx, "master", "Box Master")
+
+@bot.command(name='box-itens', aliases=['box_itens', 'boxitens'])
+async def box_itens(ctx):
+    """Abrir uma Box de Itens"""
+    await create_box_animation(ctx, "itens", "Box de Itens")
+
+@bot.command(name='box-festivas', aliases=['box_festivas', 'boxfestivas'])
+async def box_festivas(ctx):
+    """Abrir uma Box de Habilidades Festivas"""
+    await create_box_animation(ctx, "festivas", "Box Festiva")
+
+@bot.command(name='box-exclusivas', aliases=['box_exclusivas', 'boxexclusivas'])
+async def box_exclusivas(ctx):
+    """Abrir uma Box de Habilidades Exclusivas"""
+    await create_box_animation(ctx, "exclusivas", "Box Exclusiva")
+
+# --- Sistema de Parcerias ---
+CANAL_PARCERIAS_ID = 1319063191225106433
+
+# Inicializar tabela de parcerias no banco de dados
+def init_partnerships_table():
+    conn = sqlite3.connect('bot_database.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS partnerships (
+        user_id INTEGER PRIMARY KEY,
+        count INTEGER DEFAULT 0,
+        last_links TEXT DEFAULT '[]'
+    )
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+# Chamar inicialização das parcerias
+init_partnerships_table()
+
+def get_user_partnerships(user_id):
+    """Obter número de parcerias de um usuário"""
+    conn = sqlite3.connect('bot_database.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT count FROM partnerships WHERE user_id = ?', (user_id,))
+    result = cursor.fetchone()
+    conn.close()
+    return result[0] if result else 0
+
+def get_user_last_links(user_id):
+    """Obter últimos links enviados pelo usuário"""
+    conn = sqlite3.connect('bot_database.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT last_links FROM partnerships WHERE user_id = ?', (user_id,))
+    result = cursor.fetchone()
+    conn.close()
+    
+    if result and result[0]:
+        return json.loads(result[0])
+    return []
+
+def add_partnership(user_id, link):
+    """Adicionar uma parceria ao usuário"""
+    conn = sqlite3.connect('bot_database.db')
+    cursor = conn.cursor()
+    
+    # Obter dados atuais
+    current_count = get_user_partnerships(user_id)
+    last_links = get_user_last_links(user_id)
+    
+    # Verificar se o link já foi usado recentemente (últimos 10 links)
+    if link in last_links[-10:]:
+        conn.close()
+        return False, current_count  # Link duplicado
+    
+    # Adicionar novo link à lista
+    last_links.append(link)
+    
+    # Manter apenas os últimos 10 links
+    last_links = last_links[-10:]
+    
+    # Atualizar no banco
+    cursor.execute('''
+    INSERT OR REPLACE INTO partnerships (user_id, count, last_links) 
+    VALUES (?, ?, ?)
+    ''', (user_id, current_count + 1, json.dumps(last_links)))
+    
+    conn.commit()
+    conn.close()
+    return True, current_count + 1
+
+def get_partnerships_ranking():
+    """Obter ranking de parcerias"""
+    conn = sqlite3.connect('bot_database.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT user_id, count FROM partnerships ORDER BY count DESC LIMIT 10')
+    results = cursor.fetchall()
+    conn.close()
+    return results
+
+@bot.event
+async def on_message(message):
+    # Ignorar mensagens de bots
+    if message.author.bot:
+        return
+    
+    # Verificar se a mensagem é do canal de parcerias
+    if message.channel.id == CANAL_PARCERIAS_ID:
+        # Expressão regular para detectar links do Discord
+        discord_link_pattern = r'(?:https?://)?(?:www\.)?discord\.gg/[a-zA-Z0-9]+'
+        
+        # Buscar por links do Discord na mensagem
+        discord_links = re.findall(discord_link_pattern, message.content, re.IGNORECASE)
+        
+        if discord_links:
+            # Pegar o primeiro link encontrado
+            first_link = discord_links[0]
+            
+            # Tentar adicionar a parceria
+            success, new_count = add_partnership(message.author.id, first_link)
+            
+            if success:
+                # Criar embed de confirmação
+                embed = discord.Embed(
+                    title="︵‿︵‿୨♡୧‿︵‿︵",
+                    description="*・˚₊‧༉🪄 **PARCERIA CONCLUÍDA!** ✧.ೃ༄",
+                    color=discord.Color.from_rgb(255, 182, 193)  # Rosa claro
+                )
+                
+                embed.add_field(
+                    name="︵‿︵‿୨♡୧‿︵‿︵",
+                    value=(
+                        f"⤷ 💌 Olá, {message.author.mention}\n"
+                        f"🎊 Você acaba de conquistar mais uma parceria!\n\n"
+                        f"🌟 +1 Parceria para sua lista.\n"
+                        f"✨ Agora tu tens: **{new_count} parcerias**\n"
+                        f"🍀 Você pode usar o comando `p!parcerias` para ver o ranking de parcerias.\n\n"
+                        f"︵‿︵‿୨♡୧‿︵‿︵"
+                    ),
+                    inline=False
+                )
+                
+                embed.set_footer(text=f"Parceria registrada com sucesso! - Dev: YevgennyMXP")
+                embed.set_thumbnail(url=message.author.display_avatar.url)
+                
+                # Mencionar o cargo antes do embed
+                role_mention = f"<@&1319062780288045147>"
+                await message.reply(content=role_mention, embed=embed)
+            else:
+                # Link duplicado - enviar mensagem discreta
+                embed = discord.Embed(
+                    title="🔄 Link Já Utilizado",
+                    description=f"{message.author.mention}, esse link já foi usado recentemente. Tente com um link diferente!",
+                    color=discord.Color.orange()
+                )
+                await message.reply(embed=embed, delete_after=10)
+    
+    # Dar XP aleatório por mensagem (1-3 XP) - código existente
+    if random.random() < 0.1:  # 10% de chance
+        xp_gain = random.randint(1, 3)
+        add_user_xp(message.author.id, xp_gain)
+
+    await bot.process_commands(message)
+
+@bot.command(name='parcerias', aliases=['ranking_parcerias', 'rankingparcerias'])
+async def ranking_parcerias(ctx):
+    """Ver ranking de parcerias"""
+    ranking = get_partnerships_ranking()
+    
+    if not ranking:
+        embed = discord.Embed(
+            title="📊 Ranking de Parcerias",
+            description="Ainda não há parcerias registradas!",
+            color=discord.Color.blue()
+        )
+        await ctx.reply(embed=embed)
+        return
+    
+    embed = discord.Embed(
+        title="🏆 Ranking de Parcerias",
+        description="Top 10 usuários com mais parcerias registradas!",
+        color=discord.Color.gold()
+    )
+    embed.set_thumbnail(url=ctx.guild.icon.url if ctx.guild.icon else None)
+    
+    for i, (user_id, count) in enumerate(ranking, 1):
+        user = bot.get_user(user_id)
+        name = user.display_name if user else "Usuário Desconhecido"
+        
+        if i == 1:
+            emoji = "🥇"
+        elif i == 2:
+            emoji = "🥈"
+        elif i == 3:
+            emoji = "🥉"
+        else:
+            emoji = f"#{i}"
+        
+        embed.add_field(
+            name=f"{emoji} {name}",
+            value=f"💌 **{count} parcerias**",
+            inline=False
+        )
+    
+    embed.set_footer(text=f"Envie links do Discord em <#{CANAL_PARCERIAS_ID}> para somar parcerias! - Dev: YevgennyMXP")
+    await ctx.reply(embed=embed)
+
+@bot.command(name='minhas_parcerias', aliases=['mparcerias'])
+async def minhas_parcerias(ctx):
+    """Ver suas próprias parcerias"""
+    count = get_user_partnerships(ctx.author.id)
+    
+    embed = discord.Embed(
+        title="💌 Suas Parcerias",
+        description=f"**{ctx.author.display_name}**, você tem **{count} parcerias** registradas!",
+        color=discord.Color.purple()
+    )
+    embed.set_thumbnail(url=ctx.author.display_avatar.url)
+    embed.add_field(
+        name="📈 Dica",
+        value=f"Envie links do Discord em <#{CANAL_PARCERIAS_ID}> para aumentar sua contagem!",
+        inline=False
+    )
+    embed.set_footer(text="Use p!parcerias para ver o ranking geral - Dev: YevgennyMXP")
+    
+    await ctx.reply(embed=embed)
+
+# --- Sistema de Clima Temporal e Previsões Meteorológicas Avançadas ---
+
+# Base de dados de condições climáticas e seus efeitos
+CLIMA_DATABASE = {
+    "condicoes": {
+        "ensolarado": {
+            "emoji": "☀️", "temp_range": (20, 35), "humidity": (30, 60),
+            "effect": "Aumenta moral dos jogadores", "visibility": 10,
+            "wind_range": (0, 15), "description": "Dia perfeito para atividades ao ar livre"
+        },
+        "nublado": {
+            "emoji": "☁️", "temp_range": (15, 25), "humidity": (50, 80),
+            "effect": "Condições neutras", "visibility": 8,
+            "wind_range": (5, 20), "description": "Céu coberto com nuvens espessas"
+        },
+        "chuvoso": {
+            "emoji": "🌧️", "temp_range": (10, 20), "humidity": (80, 95),
+            "effect": "Dificulta dribles e finalizações", "visibility": 5,
+            "wind_range": (10, 30), "description": "Precipitação moderada a forte"
+        },
+        "tempestade": {
+            "emoji": "⛈️", "temp_range": (8, 18), "humidity": (85, 100),
+            "effect": "Jogadores perdem velocidade drasticamente", "visibility": 3,
+            "wind_range": (25, 50), "description": "Tempestade com raios e trovões"
+        },
+        "nevando": {
+            "emoji": "❄️", "temp_range": (-5, 5), "humidity": (70, 90),
+            "effect": "Jogadores escorregam com frequência", "visibility": 4,
+            "wind_range": (0, 25), "description": "Queda de neve intensa"
+        },
+        "ventoso": {
+            "emoji": "🌪️", "temp_range": (12, 28), "humidity": (40, 70),
+            "effect": "Bolas aéreas ficam imprevisíveis", "visibility": 7,
+            "wind_range": (30, 60), "description": "Ventos fortes e rajadas"
+        },
+        "neblina": {
+            "emoji": "🌫️", "temp_range": (5, 15), "humidity": (90, 100),
+            "effect": "Passa e defesas ficam menos precisos", "visibility": 2,
+            "wind_range": (0, 10), "description": "Neblina densa com visibilidade reduzida"
+        },
+        "calor_extremo": {
+            "emoji": "🔥", "temp_range": (35, 45), "humidity": (20, 40),
+            "effect": "Jogadores cansam mais rápido", "visibility": 9,
+            "wind_range": (0, 20), "description": "Calor escaldante e seco"
+        }
+    },
+    "cidades_brasil": [
+        "São Paulo", "Rio de Janeiro", "Belo Horizonte", "Salvador", "Brasília",
+        "Fortaleza", "Manaus", "Curitiba", "Recife", "Porto Alegre", "Goiânia",
+        "Belém", "Guarulhos", "Campinas", "São Luís", "São Gonçalo", "Maceió",
+        "Duque de Caxias", "Natal", "Teresina", "Campo Grande", "Nova Iguaçu",
+        "São Bernardo do Campo", "João Pessoa", "Santo André", "Osasco"
+    ]
+}
+
+# Inicializar tabela de clima no banco de dados
+def init_weather_database():
+    conn = sqlite3.connect('bot_database.db')
+    cursor = conn.cursor()
+    
+    # Tabela de histórico de clima
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS weather_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        city TEXT,
+        condition TEXT,
+        temperature REAL,
+        humidity INTEGER,
+        wind_speed INTEGER,
+        visibility INTEGER,
+        date_checked TEXT,
+        prediction_accuracy REAL
+    )
+    ''')
+    
+    # Tabela de alertas meteorológicos
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS weather_alerts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        city TEXT,
+        alert_type TEXT,
+        threshold_value REAL,
+        is_active INTEGER DEFAULT 1,
+        created_date TEXT
+    )
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+# Chamar inicialização do clima
+init_weather_database()
+
+class WeatherSystem:
+    def __init__(self):
+        self.conditions = CLIMA_DATABASE["condicoes"]
+        self.cities = CLIMA_DATABASE["cidades_brasil"]
+    
+    def generate_weather(self, city=None):
+        """Gera condições climáticas realistas para uma cidade"""
+        if not city:
+            city = random.choice(self.cities)
+        
+        # Selecionar condição baseada em probabilidades realistas
+        condition_weights = {
+            "ensolarado": 25, "nublado": 20, "chuvoso": 15, "tempestade": 5,
+            "nevando": 2, "ventoso": 10, "neblina": 8, "calor_extremo": 3
+        }
+        
+        # Ajustar probabilidades baseado na cidade (algumas regiões são mais chuvosas, etc.)
+        if city in ["Manaus", "Belém"]:  # Região Norte - mais chuva
+            condition_weights["chuvoso"] += 10
+            condition_weights["tempestade"] += 5
+        elif city in ["São Paulo", "Curitiba"]:  # Sul/Sudeste - mais frio
+            condition_weights["nevando"] += 3
+            condition_weights["neblina"] += 5
+        elif city in ["Fortaleza", "Salvador", "Recife"]:  # Nordeste - mais sol
+            condition_weights["ensolarado"] += 15
+            condition_weights["calor_extremo"] += 5
+        
+        # Criar lista ponderada
+        weighted_conditions = []
+        for condition, weight in condition_weights.items():
+            weighted_conditions.extend([condition] * weight)
+        
+        selected_condition = random.choice(weighted_conditions)
+        condition_data = self.conditions[selected_condition]
+        
+        # Gerar valores específicos dentro dos ranges
+        temperature = round(random.uniform(*condition_data["temp_range"]), 1)
+        humidity = random.randint(*condition_data["humidity"])
+        wind_speed = random.randint(*condition_data["wind_range"])
+        visibility = condition_data["visibility"]
+        
+        # Adicionar variação aleatória na visibilidade
+        visibility += random.randint(-1, 1)
+        visibility = max(1, min(10, visibility))
+        
+        return {
+            "city": city,
+            "condition": selected_condition,
+            "condition_data": condition_data,
+            "temperature": temperature,
+            "humidity": humidity,
+            "wind_speed": wind_speed,
+            "visibility": visibility,
+            "uv_index": self.calculate_uv_index(selected_condition, temperature),
+            "air_quality": self.calculate_air_quality(selected_condition, wind_speed),
+            "feels_like": self.calculate_feels_like(temperature, humidity, wind_speed)
+        }
+    
+    def calculate_uv_index(self, condition, temperature):
+        """Calcula índice UV baseado na condição e temperatura"""
+        base_uv = {
+            "ensolarado": 8, "calor_extremo": 10, "nublado": 4,
+            "chuvoso": 2, "tempestade": 1, "nevando": 1,
+            "ventoso": 6, "neblina": 2
+        }
+        
+        uv = base_uv.get(condition, 3)
+        if temperature > 30:
+            uv += 2
+        elif temperature < 10:
+            uv -= 1
+        
+        return max(1, min(11, uv))
+    
+    def calculate_air_quality(self, condition, wind_speed):
+        """Calcula qualidade do ar"""
+        base_quality = {
+            "ensolarado": 85, "nublado": 75, "chuvoso": 95,
+            "tempestade": 90, "nevando": 80, "ventoso": 70,
+            "neblina": 45, "calor_extremo": 60
+        }
+        
+        quality = base_quality.get(condition, 70)
+        
+        # Vento ajuda a limpar o ar
+        if wind_speed > 20:
+            quality += 10
+        elif wind_speed < 5:
+            quality -= 10
+        
+        return max(20, min(100, quality))
+    
+    def calculate_feels_like(self, temp, humidity, wind):
+        """Calcula sensação térmica"""
+        if temp > 25:
+            # Heat index
+            feels_like = temp + (humidity / 100) * 5 - (wind / 10)
+        else:
+            # Wind chill
+            feels_like = temp - (wind / 10) * 2
+        
+        return round(feels_like, 1)
+    
+    def get_weather_forecast(self, city, days=5):
+        """Gera previsão de vários dias"""
+        forecast = []
+        for i in range(days):
+            weather = self.generate_weather(city)
+            
+            # Simular data futura
+            future_date = datetime.now() + timedelta(days=i)
+            weather["date"] = future_date.strftime("%d/%m/%Y")
+            weather["day_name"] = future_date.strftime("%A")
+            
+            forecast.append(weather)
+        
+        return forecast
+    
+    def save_weather_check(self, user_id, weather_data):
+        """Salva consulta de clima no histórico"""
+        conn = sqlite3.connect('bot_database.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        INSERT INTO weather_history 
+        (user_id, city, condition, temperature, humidity, wind_speed, visibility, date_checked)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (user_id, weather_data["city"], weather_data["condition"], 
+              weather_data["temperature"], weather_data["humidity"], 
+              weather_data["wind_speed"], weather_data["visibility"], 
+              datetime.now().isoformat()))
+        
+        conn.commit()
+        conn.close()
+    
+    def get_user_weather_history(self, user_id, limit=10):
+        """Obtém histórico de consultas de clima do usuário"""
+        conn = sqlite3.connect('bot_database.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        SELECT city, condition, temperature, date_checked 
+        FROM weather_history 
+        WHERE user_id = ? 
+        ORDER BY date_checked DESC 
+        LIMIT ?
+        ''', (user_id, limit))
+        
+        results = cursor.fetchall()
+        conn.close()
+        return results
+
+# Instanciar sistema de clima
+weather_system = WeatherSystem()
+
+class WeatherView(View):
+    def __init__(self, user_id, current_weather):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        self.current_weather = current_weather
+    
+    @discord.ui.button(label="📅 Previsão 5 Dias", style=discord.ButtonStyle.primary, emoji="🔮")
+    async def get_forecast(self, interaction: discord.Interaction, button: Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ Apenas quem consultou pode ver a previsão!", ephemeral=True)
+            return
+        
+        forecast = weather_system.get_weather_forecast(self.current_weather["city"], 5)
+        
+        embed = discord.Embed(
+            title=f"🔮 Previsão de 5 Dias - {self.current_weather['city']}",
+            description="Previsão meteorológica detalhada para os próximos dias",
+            color=discord.Color.blue()
+        )
+        
+        for day_weather in forecast:
+            condition_data = day_weather["condition_data"]
+            day_text = (
+                f"{condition_data['emoji']} **{day_weather['condition'].title()}**\n"
+                f"🌡️ {day_weather['temperature']}°C (Sensação: {day_weather['feels_like']}°C)\n"
+                f"💧 Umidade: {day_weather['humidity']}%\n"
+                f"💨 Vento: {day_weather['wind_speed']} km/h"
+            )
+            
+            embed.add_field(
+                name=f"{day_weather['day_name']} - {day_weather['date']}",
+                value=day_text,
+                inline=True
+            )
+        
+        embed.set_footer(text=f"Previsão gerada para {interaction.user.display_name} - Dev: YevgennyMXP")
+        await interaction.response.edit_message(embed=embed, view=self)
+    
+    @discord.ui.button(label="📊 Análise Detalhada", style=discord.ButtonStyle.success, emoji="🔬")
+    async def detailed_analysis(self, interaction: discord.Interaction, button: Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ Apenas quem consultou pode ver a análise!", ephemeral=True)
+            return
+        
+        weather = self.current_weather
+        condition_data = weather["condition_data"]
+        
+        embed = discord.Embed(
+            title=f"🔬 Análise Meteorológica Detalhada",
+            description=f"**{weather['city']}** - Condições atuais",
+            color=discord.Color.green()
+        )
+        
+        embed.add_field(
+            name="🌤️ Condição Principal",
+            value=f"{condition_data['emoji']} **{weather['condition'].title()}**\n*{condition_data['description']}*",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="🌡️ Dados Térmicos",
+            value=(
+                f"**Temperatura:** {weather['temperature']}°C\n"
+                f"**Sensação Térmica:** {weather['feels_like']}°C\n"
+                f"**Umidade Relativa:** {weather['humidity']}%"
+            ),
+            inline=True
+        )
+        
+        embed.add_field(
+            name="💨 Condições do Vento",
+            value=(
+                f"**Velocidade:** {weather['wind_speed']} km/h\n"
+                f"**Visibilidade:** {weather['visibility']}/10\n"
+                f"**Qualidade do Ar:** {weather['air_quality']}/100"
+            ),
+            inline=True
+        )
+        
+        embed.add_field(
+            name="☀️ Índices Especiais",
+            value=(
+                f"**Índice UV:** {weather['uv_index']}/11\n"
+                f"**Efeito no Futebol:** {condition_data['effect']}\n"
+                f"**Recomendação:** {'Ideal para jogar' if weather['uv_index'] < 6 else 'Use protetor solar'}"
+            ),
+            inline=False
+        )
+        
+        # Adicionar alertas baseados nas condições
+        alerts = []
+        if weather["temperature"] > 35:
+            alerts.append("🔥 **Alerta de Calor Extremo**")
+        if weather["uv_index"] > 8:
+            alerts.append("☀️ **Alto Índice UV - Use Proteção**")
+        if weather["wind_speed"] > 40:
+            alerts.append("💨 **Ventos Fortes - Cuidado**")
+        if weather["visibility"] < 4:
+            alerts.append("🌫️ **Baixa Visibilidade**")
+        if weather["air_quality"] < 50:
+            alerts.append("😷 **Qualidade do Ar Ruim**")
+        
+        if alerts:
+            embed.add_field(
+                name="⚠️ Alertas Meteorológicos",
+                value="\n".join(alerts),
+                inline=False
+            )
+        
+        embed.set_footer(text=f"Análise completa para {interaction.user.display_name} - Dev: YevgennyMXP")
+        await interaction.response.edit_message(embed=embed, view=self)
+    
+    @discord.ui.button(label="📈 Meu Histórico", style=discord.ButtonStyle.secondary, emoji="📋")
+    async def weather_history(self, interaction: discord.Interaction, button: Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ Apenas quem consultou pode ver o histórico!", ephemeral=True)
+            return
+        
+        history = weather_system.get_user_weather_history(self.user_id, 8)
+        
+        embed = discord.Embed(
+            title="📋 Seu Histórico de Consultas Meteorológicas",
+            description="Últimas cidades e condições consultadas",
+            color=discord.Color.purple()
+        )
+        
+        if not history:
+            embed.add_field(
+                name="📊 Histórico Vazio",
+                value="Esta é sua primeira consulta meteorológica!",
+                inline=False
+            )
+        else:
+            for i, (city, condition, temp, date_checked) in enumerate(history, 1):
+                date_obj = datetime.fromisoformat(date_checked)
+                formatted_date = date_obj.strftime("%d/%m/%Y %H:%M")
+                
+                condition_emoji = weather_system.conditions.get(condition, {}).get("emoji", "🌤️")
+                
+                embed.add_field(
+                    name=f"{i}. {city}",
+                    value=f"{condition_emoji} {condition.title()}\n🌡️ {temp}°C\n📅 {formatted_date}",
+                    inline=True
+                )
+        
+        embed.set_footer(text=f"Total de consultas: {len(history)} - Dev: YevgennyMXP")
+        await interaction.response.edit_message(embed=embed, view=self)
+
+@bot.command(name='clima_avancado', aliases=['weather_pro', 'tempo_detalhado'])
+async def advanced_weather(ctx, *, city=None):
+    """Sistema avançado de clima com previsões e análises detalhadas"""
+    
+    # Gerar dados meteorológicos
+    weather_data = weather_system.generate_weather(city)
+    
+    # Salvar no histórico
+    weather_system.save_weather_check(ctx.author.id, weather_data)
+    
+    condition_data = weather_data["condition_data"]
+    
+    # Determinar cor do embed baseada na condição
+    condition_colors = {
+        "ensolarado": discord.Color.gold(),
+        "nublado": discord.Color.light_grey(),
+        "chuvoso": discord.Color.blue(),
+        "tempestade": discord.Color.dark_purple(),
+        "nevando": discord.Color.from_rgb(173, 216, 230),
+        "ventoso": discord.Color.from_rgb(135, 206, 235),
+        "neblina": discord.Color.from_rgb(105, 105, 105),
+        "calor_extremo": discord.Color.red()
+    }
+    
+    embed = discord.Embed(
+        title=f"🌤️ **CENTRO METEOROLÓGICO AVANÇADO** 🌤️",
+        description=f"**📍 {weather_data['city']}** - Condições em tempo real",
+        color=condition_colors.get(weather_data["condition"], discord.Color.blue())
+    )
+    
+    # Condição principal
+    embed.add_field(
+        name="🌡️ Condição Atual",
+        value=(
+            f"{condition_data['emoji']} **{weather_data['condition'].title()}**\n"
+            f"*{condition_data['description']}*\n"
+            f"**Temperatura:** {weather_data['temperature']}°C\n"
+            f"**Sensação Térmica:** {weather_data['feels_like']}°C"
+        ),
+        inline=True
+    )
+    
+    # Dados atmosféricos
+    embed.add_field(
+        name="💧 Dados Atmosféricos",
+        value=(
+            f"**Umidade:** {weather_data['humidity']}%\n"
+            f"**Pressão:** {random.randint(980, 1020)} hPa\n"
+            f"**Ponto de Orvalho:** {weather_data['temperature'] - 5}°C\n"
+            f"**Visibilidade:** {weather_data['visibility']}/10"
+        ),
+        inline=True
+    )
+    
+    # Vento e qualidade
+    embed.add_field(
+        name="💨 Vento & Qualidade",
+        value=(
+            f"**Velocidade:** {weather_data['wind_speed']} km/h\n"
+            f"**Direção:** {random.choice(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'])}\n"
+            f"**Qualidade do Ar:** {weather_data['air_quality']}/100\n"
+            f"**Índice UV:** {weather_data['uv_index']}/11"
+        ),
+        inline=True
+    )
+    
+    # Impacto no futebol
+    embed.add_field(
+        name="⚽ Impacto no Futebol",
+        value=f"🎯 **Efeito:** {condition_data['effect']}\n📊 **Condição para Jogo:** {'Perfeita' if weather_data['visibility'] > 7 else 'Moderada' if weather_data['visibility'] > 4 else 'Ruim'}",
+        inline=False
+    )
+    
+    # Recomendações baseadas nas condições
+    recommendations = []
+    if weather_data["temperature"] > 30:
+        recommendations.append("💧 Hidrate-se constantemente")
+    if weather_data["uv_index"] > 6:
+        recommendations.append("🧴 Use protetor solar FPS 30+")
+    if weather_data["wind_speed"] > 25:
+        recommendations.append("🌪️ Cuidado com ventos fortes")
+    if weather_data["humidity"] > 80:
+        recommendations.append("👕 Use roupas leves e respiráveis")
+    if weather_data["visibility"] < 5:
+        recommendations.append("👀 Atenção com a baixa visibilidade")
+    
+    if recommendations:
+        embed.add_field(
+            name="💡 Recomendações",
+            value="\n".join(recommendations[:3]),  # Máximo 3 recomendações
+            inline=False
+        )
+    
+    embed.set_footer(text=f"Dados meteorológicos para {ctx.author.display_name} • Use os botões para mais informações - Dev: YevgennyMXP")
+    embed.set_thumbnail(url=ctx.author.display_avatar.url)
+    
+    # Adicionar uma imagem relacionada ao clima (opcional)
+    weather_images = {
+        "ensolarado": "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800",
+        "chuvoso": "https://images.unsplash.com/photo-1433863448220-78aaa064ff47?w=800",
+        "tempestade": "https://images.unsplash.com/photo-1500740516770-92bd004b996e?w=800",
+        "nevando": "https://images.unsplash.com/photo-1422728221357-57980993ea99?w=800"
+    }
+    
+    if weather_data["condition"] in weather_images:
+        embed.set_image(url=weather_images[weather_data["condition"]])
+    
+    view = WeatherView(ctx.author.id, weather_data)
+    await ctx.reply(embed=embed, view=view)
+
+# --- Sistema de Pênaltis ---
+
+class PenaltyShootout:
+    """Simulador de disputa de pênaltis entre times"""
+    
+    def __init__(self, team1: str, team2: str):
+        self.team1 = team1
+        self.team2 = team2
+        self.team1_score = 0
+        self.team2_score = 0
+        self.team1_penalties = []
+        self.team2_penalties = []
+        self.current_round = 1
+        self.max_rounds = 5
+        self.sudden_death = False
+        
+        # Posições de chute e defesa
+        self.positions = ["esquerda", "meio", "direita"]
+        
+        # Nomes de jogadores genéricos
+        self.player_names = [
+            "Silva", "Santos", "Oliveira", "Costa", "Pereira", "Rodrigues",
+            "Almeida", "Nascimento", "Lima", "Araújo", "Fernandes", "Carvalho"
+        ]
+        
+        # Nomes de goleiros
+        self.goalkeeper_names = [
+            "Cássio", "Alisson", "Weverton", "Santos", "Fábio", "Rafael"
+        ]
+    
+    def get_random_player(self, team_name):
+        """Retorna nome de jogador aleatório"""
+        return random.choice(self.player_names)
+    
+    def get_random_goalkeeper(self, team_name):
+        """Retorna nome de goleiro aleatório"""
+        return random.choice(self.goalkeeper_names)
+    
+    def simulate_penalty(self, shooting_team):
+        """Simula um pênalti individual"""
+        shooter = self.get_random_player(shooting_team)
+        goalkeeper = self.get_random_goalkeeper("Defesa")
+        
+        # Posições de chute e defesa
+        shot_position = random.choice(self.positions)
+        save_position = random.choice(self.positions)
+        
+        # Calcular resultado
+        if shot_position == save_position:
+            # Goleiro foi na direção certa
+            if random.random() < 0.7:  # 70% chance de defesa
+                result = "defendido"
+                description = f"🧤 **DEFESA!** {goalkeeper} voou no canto {save_position} e defendeu o chute de {shooter}!"
+            else:
+                result = "gol"
+                description = f"⚽ **GOL!** {shooter} chutou no {shot_position}, {goalkeeper} foi na direção certa mas não conseguiu alcançar!"
+        else:
+            # Goleiro errou a direção
+            if random.random() < 0.85:  # 85% chance de gol
+                result = "gol"
+                description = f"⚽ **GOL!** {shooter} chutou no {shot_position} enquanto {goalkeeper} mergulhou para o {save_position}!"
+            else:
+                result = "errado"
+                description = f"😱 **PRA FORA!** {shooter} chutou por cima do gol! {goalkeeper} nem precisou se mexer!"
+        
+        return {
+            "shooter": shooter,
+            "goalkeeper": goalkeeper,
+            "shot_position": shot_position,
+            "save_position": save_position,
+            "result": result,
+            "description": description
+        }
+    
+    def is_shootout_over(self):
+        """Verifica se a disputa acabou"""
+        if self.current_round <= self.max_rounds:
+            # Rounds normais - verificar se um time já não pode mais empatar
+            remaining_rounds = self.max_rounds - self.current_round + 1
+            if abs(self.team1_score - self.team2_score) > remaining_rounds:
+                return True
+        else:
+            # Morte súbita
+            if self.current_round > self.max_rounds and self.team1_score != self.team2_score:
+                return True
+        
+        return False
+    
+    async def simulate_full_shootout(self, ctx):
+        """Simula disputa completa de pênaltis"""
+        
+        # Embed inicial
+        embed = discord.Embed(
+            title="⚽ **DISPUTA DE PÊNALTIS** ⚽",
+            description=f"🏟️ **{self.team1}** 🆚 **{self.team2}**\n\n🎯 Iniciando a decisão nos pênaltis!",
+            color=discord.Color.blue()
+        )
+        embed.set_footer(text="⚽ Disputa de pênaltis iniciada! - Dev: YevgennyMXP")
+        
+        message = await ctx.reply(embed=embed)
+        await asyncio.sleep(2)
+        
+        # Determinar quem começa
+        first_team = random.choice([self.team1, self.team2])
+        teams_order = [first_team, self.team2 if first_team == self.team1 else self.team1]
+        
+        while not self.is_shootout_over():
+            for i, team in enumerate(teams_order):
+                if self.is_shootout_over():
+                    break
+                
+                # Simular pênalti
+                penalty_result = self.simulate_penalty(team)
+                
+                # Atualizar placar
+                if penalty_result["result"] == "gol":
+                    if team == self.team1:
+                        self.team1_score += 1
+                        self.team1_penalties.append("⚽")
+                    else:
+                        self.team2_score += 1
+                        self.team2_penalties.append("⚽")
+                else:
+                    if team == self.team1:
+                        self.team1_penalties.append("❌")
+                    else:
+                        self.team2_penalties.append("❌")
+                
+                # Criar embed de pênalti
+                penalty_embed = discord.Embed(
+                    title="⚽ **DISPUTA DE PÊNALTIS** ⚽",
+                    description=f"🏟️ **{self.team1}** 🆚 **{self.team2}**",
+                    color=discord.Color.orange()
+                )
+                
+                penalty_embed.add_field(
+                    name=f"🎯 Rodada {self.current_round} - {team}",
+                    value=penalty_result["description"],
+                    inline=False
+                )
+                
+                # Mostrar placar atual
+                team1_penalties_str = " ".join(self.team1_penalties) if self.team1_penalties else "—"
+                team2_penalties_str = " ".join(self.team2_penalties) if self.team2_penalties else "—"
+                
+                penalty_embed.add_field(
+                    name="📊 Placar dos Pênaltis",
+                    value=f"**{self.team1}:** {self.team1_score} {team1_penalties_str}\n**{self.team2}:** {self.team2_score} {team2_penalties_str}",
+                    inline=False
+                )
+                
+                if self.current_round > self.max_rounds:
+                    penalty_embed.add_field(
+                        name="💀 MORTE SÚBITA",
+                        value="A disputa entrou em morte súbita! Quem errar primeiro, perde!",
+                        inline=False
+                    )
+                
+                penalty_embed.set_footer(text="⚽ Disputa em andamento... - Dev: YevgennyMXP")
+                
+                await message.edit(embed=penalty_embed)
+                await asyncio.sleep(2.5)
+            
+            # Após ambos chutarem na rodada
+            if self.current_round <= self.max_rounds or (self.current_round > self.max_rounds and len(self.team1_penalties) == len(self.team2_penalties)):
+                self.current_round += 1
+        
+        # Resultado final
+        if self.team1_score > self.team2_score:
+            winner = self.team1
+            winner_score = self.team1_score
+            loser_score = self.team2_score
+        else:
+            winner = self.team2
+            winner_score = self.team2_score
+            loser_score = self.team1_score
+        
+        final_embed = discord.Embed(
+            title="🏆 **DISPUTA DE PÊNALTIS FINALIZADA** 🏆",
+            description=f"🎉 **{winner}** venceu a disputa de pênaltis!",
+            color=discord.Color.gold()
+        )
+        
+        final_embed.add_field(
+            name="📊 Resultado Final",
+            value=f"**{winner}:** {winner_score} pênaltis\n**{self.team2 if winner == self.team1 else self.team1}:** {loser_score} pênaltis",
+            inline=True
+        )
+        
+        team1_penalties_str = " ".join(self.team1_penalties)
+        team2_penalties_str = " ".join(self.team2_penalties)
+        
+        final_embed.add_field(
+            name="⚽ Sequência de Pênaltis",
+            value=f"**{self.team1}:** {team1_penalties_str}\n**{self.team2}:** {team2_penalties_str}",
+            inline=False
+        )
+        
+        final_embed.add_field(
+            name="📈 Estatísticas",
+            value=f"**Total de pênaltis:** {len(self.team1_penalties) + len(self.team2_penalties)}\n**Rodadas:** {max(len(self.team1_penalties), len(self.team2_penalties))}\n**Precisão:** {((self.team1_score + self.team2_score) / (len(self.team1_penalties) + len(self.team2_penalties)) * 100):.1f}%",
+            inline=False
+        )
+        
+        final_embed.set_footer(text=f"🏆 {winner} é o campeão da disputa! - Dev: YevgennyMXP")
+        
+        await message.edit(embed=final_embed)
+
+class PenaltyDuel:
+    """Sistema de duelo de pênaltis entre jogadores"""
+    
+    def __init__(self, challenger_id: int, challenged_id: int):
+        self.challenger_id = challenger_id
+        self.challenged_id = challenged_id
+        self.challenger_score = 0
+        self.challenged_score = 0
+        self.current_round = 1
+        self.max_rounds = 5
+        self.current_shooter = challenger_id
+        self.current_goalkeeper = challenged_id
+        self.penalties_taken = []
+        self.game_over = False
+        self.winner = None
+        
+        # Posições disponíveis
+        self.positions = {
+            "esquerda": "⬅️",
+            "meio": "⬆️", 
+            "direita": "➡️"
+        }
+    
+    def switch_roles(self):
+        """Alterna entre atacante e goleiro"""
+        self.current_shooter, self.current_goalkeeper = self.current_goalkeeper, self.current_shooter
+    
+    def is_duel_over(self):
+        """Verifica se o duelo acabou"""
+        # Máximo de 10 rodadas total (5 normais + 5 extras máximo)
+        if self.current_round > 10:
+            return True
+        
+        if self.current_round > self.max_rounds:
+            if self.challenger_score != self.challenged_score:
+                return True
+        return False
+    
+    def determine_winner(self):
+        """Determina o vencedor do duelo"""
+        if self.challenger_score > self.challenged_score:
+            self.winner = self.challenger_id
+        elif self.challenged_score > self.challenger_score:
+            self.winner = self.challenged_id
+        else:
+            self.winner = None  # Empate
+    
+    def process_penalty(self, shot_pos: str, save_pos: str):
+        """Processa um pênalti"""
+        if shot_pos == save_pos:
+            # Goleiro acertou a direção
+            if random.random() < 0.65:  # 65% chance de defesa
+                result = "defendido"
+                description = f"🧤 **DEFESA ESPETACULAR!** O goleiro mergulhou para o {shot_pos} e defendeu!"
+            else:
+                result = "gol"
+                description = f"⚽ **GOL!** Mesmo com o goleiro indo na direção certa, a bola entrou!"
+        else:
+            # Goleiro errou a direção
+            if random.random() < 0.9:  # 90% chance de gol
+                result = "gol"
+                description = f"⚽ **GOL!** Chute no {shot_pos} enquanto o goleiro foi para o {save_pos}!"
+            else:
+                result = "perdeu"
+                description = f"😱 **INCRÍVEL!** O atacante mandou para fora mesmo com o goleiro indo para o lado errado!"
+        
+        # Atualizar placar
+        if result == "gol":
+            if self.current_shooter == self.challenger_id:
+                self.challenger_score += 1
+            else:
+                self.challenged_score += 1
+        
+        # Registrar pênalti
+        self.penalties_taken.append({
+            "round": self.current_round,
+            "shooter": self.current_shooter,
+            "goalkeeper": self.current_goalkeeper,
+            "shot_position": shot_pos,
+            "save_position": save_pos,
+            "result": result,
+            "description": description
+        })
+        
+        return result, description
+
+class PenaltyDuelView(View):
+    def __init__(self, duel: PenaltyDuel):
+        super().__init__(timeout=300)
+        self.duel = duel
+        self.waiting_for_shot = True
+        self.shot_position = None
+        self.save_position = None
+    
+    async def update_embed(self, interaction, title: str, description: str, color=discord.Color.blue()):
+        """Atualiza o embed do duelo"""
+        embed = discord.Embed(title=title, description=description, color=color)
+        
+        challenger = interaction.guild.get_member(self.duel.challenger_id)
+        challenged = interaction.guild.get_member(self.duel.challenged_id)
+        shooter = interaction.guild.get_member(self.duel.current_shooter)
+        goalkeeper = interaction.guild.get_member(self.duel.current_goalkeeper)
+        
+        embed.add_field(
+            name="📊 Placar Atual",
+            value=f"**{challenger.display_name}:** {self.duel.challenger_score}\n**{challenged.display_name}:** {self.duel.challenged_score}",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="⚽ Rodada Atual",
+            value=f"**{self.duel.current_round}/{self.duel.max_rounds}**",
+            inline=True
+        )
+        
+        # Deixar muito claro de quem é a vez
+        if self.waiting_for_shot:
+            embed.add_field(
+                name="🎯 VEZ DO ATACANTE",
+                value=f"⚽ **{shooter.display_name}** - ESCOLHA ONDE CHUTAR!\n🧤 {goalkeeper.display_name} (aguardando...)",
+                inline=True
+            )
+        else:
+            embed.add_field(
+                name="🧤 VEZ DO GOLEIRO", 
+                value=f"⚽ {shooter.display_name} (já escolheu)\n🧤 **{goalkeeper.display_name}** - ESCOLHA ONDE DEFENDER!",
+                inline=True
+            )
+        
+        return embed
+    
+    @discord.ui.button(label="⬅️ Esquerda", style=discord.ButtonStyle.secondary)
+    async def left_button(self, interaction: discord.Interaction, button: Button):
+        await self.handle_position_choice(interaction, "esquerda")
+    
+    @discord.ui.button(label="⬆️ Meio", style=discord.ButtonStyle.secondary)
+    async def middle_button(self, interaction: discord.Interaction, button: Button):
+        await self.handle_position_choice(interaction, "meio")
+    
+    @discord.ui.button(label="➡️ Direita", style=discord.ButtonStyle.secondary)
+    async def right_button(self, interaction: discord.Interaction, button: Button):
+        await self.handle_position_choice(interaction, "direita")
+    
+    async def handle_position_choice(self, interaction: discord.Interaction, position: str):
+        """Processa a escolha de posição"""
+        
+        if self.waiting_for_shot:
+            # Aguardando o chute
+            if interaction.user.id != self.duel.current_shooter:
+                shooter = interaction.guild.get_member(self.duel.current_shooter)
+                await interaction.response.send_message(f"❌ É a vez de **{shooter.display_name}** chutar! Aguarde sua vez.", ephemeral=True)
+                return
+            
+            self.shot_position = position
+            self.waiting_for_shot = False
+            
+            embed = await self.update_embed(
+                interaction,
+                "🧤 Agora é a vez do GOLEIRO!",
+                f"✅ **Atacante escolheu sua posição!**\n\n🎯 **Goleiro:** Agora escolha onde vai tentar defender!"
+            )
+            
+            await interaction.response.edit_message(embed=embed, view=self)
+            
+        else:
+            # Aguardando a defesa
+            if interaction.user.id != self.duel.current_goalkeeper:
+                goalkeeper = interaction.guild.get_member(self.duel.current_goalkeeper)
+                await interaction.response.send_message(f"❌ É a vez de **{goalkeeper.display_name}** defender! Aguarde sua vez.", ephemeral=True)
+                return
+            
+            self.save_position = position
+            
+            # Processar o pênalti
+            result, description = self.duel.process_penalty(self.shot_position, self.save_position)
+            
+            # Mostrar resultado
+            color = discord.Color.green() if result == "gol" else discord.Color.red()
+            
+            # Criar embed de resultado mais detalhado
+            result_embed = discord.Embed(
+                title=f"🎯 Resultado do Pênalti - Rodada {self.duel.current_round}",
+                description=f"{description}",
+                color=color
+            )
+            
+            challenger = interaction.guild.get_member(self.duel.challenger_id)
+            challenged = interaction.guild.get_member(self.duel.challenged_id)
+            
+            result_embed.add_field(
+                name="📊 Placar Atualizado",
+                value=f"**{challenger.display_name}:** {self.duel.challenger_score}\n**{challenged.display_name}:** {self.duel.challenged_score}",
+                inline=True
+            )
+            
+            result_embed.add_field(
+                name="🎯 Escolhas Feitas",
+                value=f"**Chute:** {self.duel.positions[self.shot_position]} {self.shot_position.title()}\n**Defesa:** {self.duel.positions[self.save_position]} {self.save_position.title()}",
+                inline=True
+            )
+            
+            # Verificar se o duelo acabou
+            penalties_this_round = len([p for p in self.duel.penalties_taken if p["round"] == self.duel.current_round])
+            
+            # Se completou uma rodada (ambos chutaram)
+            if penalties_this_round == 2:
+                # Se passou das 5 rodadas normais
+                if self.duel.current_round >= 5:
+                    # Verificar se há vencedor
+                    if self.duel.challenger_score != self.duel.challenged_score:
+                        # Duelo decidido
+                        self.duel.game_over = True
+                        self.duel.determine_winner()
+                        
+                        winner = interaction.guild.get_member(self.duel.winner)
+                        final_embed = discord.Embed(
+                            title="🏆 DUELO DE PÊNALTIS FINALIZADO",
+                            description=f"🎉 **{winner.display_name}** venceu o duelo de pênaltis!",
+                            color=discord.Color.gold()
+                        )
+                        
+                        final_embed.add_field(
+                            name="📊 Resultado Final",
+                            value=f"**{challenger.display_name}:** {self.duel.challenger_score}\n**{challenged.display_name}:** {self.duel.challenged_score}",
+                            inline=False
+                        )
+                        
+                        if self.duel.current_round > 5:
+                            final_embed.add_field(
+                                name="💀 Morte Súbita",
+                                value=f"Duelo decidido na rodada {self.duel.current_round}!",
+                                inline=False
+                            )
+                        
+                        await interaction.response.edit_message(embed=final_embed, view=None)
+                        return
+                    
+                    # Verificar limite máximo de rodadas (evitar infinito)
+                    if self.duel.current_round >= 10:
+                        # Forçar fim por limite de rodadas
+                        if self.duel.challenger_score > self.duel.challenged_score:
+                            self.duel.winner = self.duel.challenger_id
+                        elif self.duel.challenged_score > self.duel.challenger_score:
+                            self.duel.winner = self.duel.challenged_id
+                        else:
+                            # Empate total - decidir por sorteio
+                            self.duel.winner = random.choice([self.duel.challenger_id, self.duel.challenged_id])
+                        
+                        winner = interaction.guild.get_member(self.duel.winner)
+                        final_embed = discord.Embed(
+                            title="🏆 DUELO FINALIZADO POR LIMITE",
+                            description=f"🎉 **{winner.display_name}** venceu após 10 rodadas!",
+                            color=discord.Color.gold()
+                        )
+                        
+                        final_embed.add_field(
+                            name="📊 Resultado Final",
+                            value=f"**{challenger.display_name}:** {self.duel.challenger_score}\n**{challenged.display_name}:** {self.duel.challenged_score}",
+                            inline=False
+                        )
+                        
+                        final_embed.add_field(
+                            name="⏰ Limite Atingido",
+                            value="Duelo finalizado após 10 rodadas para evitar disputa infinita.",
+                            inline=False
+                        )
+                        
+                        await interaction.response.edit_message(embed=final_embed, view=None)
+                        return
+            
+            # Preparar próxima rodada
+            if len([p for p in self.duel.penalties_taken if p["round"] == self.duel.current_round]) == 2:
+                # Rodada completa, avançar
+                self.duel.current_round += 1
+                self.duel.current_shooter = self.duel.challenger_id
+                self.duel.current_goalkeeper = self.duel.challenged_id
+            else:
+                # Trocar de função
+                self.duel.switch_roles()
+            
+            # Resetar para próximo pênalti
+            self.waiting_for_shot = True
+            self.shot_position = None
+            self.save_position = None
+            
+            # Mostrar resultado primeiro
+            await interaction.response.edit_message(embed=result_embed, view=None)
+            
+            # Aguardar e então mostrar próximo pênalti
+            await asyncio.sleep(4)
+            
+            shooter = interaction.guild.get_member(self.duel.current_shooter)
+            next_embed = await self.update_embed(
+                interaction,
+                f"⚽ Rodada {self.duel.current_round} - Próximo Pênalti",
+                f"🔄 **Trocaram de posições!**\n\n🎯 **Novo atacante:** {shooter.display_name}"
+            )
+            
+            # Criar nova view para evitar problemas de webhook
+            new_view = PenaltyDuelView(self.duel)
+            await interaction.followup.edit_message(interaction.message.id, embed=next_embed, view=new_view)
+
+class PenaltyAcceptView(View):
+    def __init__(self, challenger_id: int, challenged_id: int):
+        super().__init__(timeout=60)
+        self.challenger_id = challenger_id
+        self.challenged_id = challenged_id
+    
+    @discord.ui.button(label="⚽ Aceitar Duelo", style=discord.ButtonStyle.success)
+    async def accept_duel(self, interaction: discord.Interaction, button: Button):
+        if interaction.user.id != self.challenged_id:
+            await interaction.response.send_message("❌ Apenas o jogador desafiado pode aceitar!", ephemeral=True)
+            return
+        
+        # Iniciar duelo
+        duel = PenaltyDuel(self.challenger_id, self.challenged_id)
+        view = PenaltyDuelView(duel)
+        
+        challenger = interaction.guild.get_member(self.challenger_id)
+        challenged = interaction.guild.get_member(self.challenged_id)
+        shooter = interaction.guild.get_member(duel.current_shooter)
+        
+        embed = discord.Embed(
+            title="⚽ **DUELO DE PÊNALTIS INICIADO** ⚽",
+            description=f"🥅 **{challenger.display_name}** 🆚 **{challenged.display_name}**\n\n🎯 **É A VEZ DE:** {shooter.display_name} (ATACANTE)\n\n⚽ **{shooter.display_name}** - ESCOLHA ONDE CHUTAR!",
+            color=discord.Color.blue()
+        )
+        
+        embed.add_field(
+            name="📋 Regras",
+            value="• 5 pênaltis para cada jogador\n• Alternam entre atacante e goleiro\n• Em caso de empate: morte súbita\n• Atacante escolhe primeiro, depois o goleiro",
+            inline=False
+        )
+        
+        embed.set_footer(text="Use os botões para escolher a posição! - Dev: YevgennyMXP")
+        
+        await interaction.response.edit_message(embed=embed, view=view)
+    
+    @discord.ui.button(label="❌ Recusar", style=discord.ButtonStyle.danger)
+    async def decline_duel(self, interaction: discord.Interaction, button: Button):
+        if interaction.user.id != self.challenged_id:
+            await interaction.response.send_message("❌ Apenas o jogador desafiado pode recusar!", ephemeral=True)
+            return
+        
+        embed = discord.Embed(
+            title="❌ Duelo Recusado",
+            description="O duelo de pênaltis foi recusado.",
+            color=discord.Color.red()
+        )
+        await interaction.response.edit_message(embed=embed, view=None)
+
+@bot.command(name='penaltis', aliases=['shootout', 'disputapenaltis'])
+async def penalty_shootout_command(ctx, team1: str, team2: str):
+    """Simula uma disputa de pênaltis entre dois times"""
+    team1 = capitalizar_nome(team1)
+    team2 = capitalizar_nome(team2)
+    
+    if team1.lower() == team2.lower():
+        await ctx.reply("❌ Os times devem ser diferentes!")
+        return
+    
+    shootout = PenaltyShootout(team1, team2)
+    await shootout.simulate_full_shootout(ctx)
+
+@bot.command(name='penal', aliases=['duelopenal', 'penalty1v1'])
+async def penalty_duel_command(ctx, member: discord.Member):
+    """Desafia outro jogador para um duelo de pênaltis"""
+    
+    if member.id == ctx.author.id:
+        await ctx.reply("❌ Você não pode desafiar a si mesmo!")
+        return
+    
+    if member.bot:
+        await ctx.reply("❌ Você não pode desafiar bots!")
+        return
+    
+    embed = discord.Embed(
+        title="⚽ **DESAFIO DE DUELO DE PÊNALTIS** ⚽",
+        description=f"🎯 **{ctx.author.display_name}** desafiou **{member.display_name}** para um duelo de pênaltis!\n\n**Como funciona:**\n• 5 pênaltis para cada um\n• Vocês alternam entre atacante e goleiro\n• Atacante escolhe onde chutar, goleiro onde defender\n• Melhor de 5 vence!",
+        color=discord.Color.orange()
+    )
+    
+    embed.set_footer(text=f"{member.display_name}, você aceita o desafio? - Dev: YevgennyMXP")
+    embed.set_thumbnail(url=ctx.author.display_avatar.url)
+    
+    view = PenaltyAcceptView(ctx.author.id, member.id)
+    await ctx.reply(content=f"{member.mention}", embed=embed, view=view)
+
+# --- Sistema de Simulação Realista Ultra-Detalhada ---
+
+class UltraRealisticMatch:
+    """Simulador de partida ultra-realista com centenas de eventos possíveis"""
+    
+    def __init__(self):
+        # Árbitros famosos com suas características
+        self.referees = {
+            "Anderson Daronco": {"strictness": 8, "card_tendency": "high", "var_usage": 9},
+            "Raphael Claus": {"strictness": 7, "card_tendency": "medium", "var_usage": 8},
+            "Wilton Pereira Sampaio": {"strictness": 9, "card_tendency": "very_high", "var_usage": 7},
+            "Leandro Pedro Vuaden": {"strictness": 6, "card_tendency": "low", "var_usage": 9},
+            "Bráulio da Silva Machado": {"strictness": 7, "card_tendency": "medium", "var_usage": 8},
+            "Flávio Rodrigues de Souza": {"strictness": 8, "card_tendency": "high", "var_usage": 6},
+            "Ramon Abatti Abel": {"strictness": 5, "card_tendency": "low", "var_usage": 10}
+        }
+        
+        # Estádios com características específicas
+        self.stadiums = {
+            "Maracanã": {"capacity": 78838, "pitch_quality": 9, "crowd_intensity": 10, "altitude": 11, "city": "Rio de Janeiro"},
+            "Morumbi": {"capacity": 67428, "pitch_quality": 8, "crowd_intensity": 9, "altitude": 760, "city": "São Paulo"},
+            "Arena Corinthians": {"capacity": 49205, "pitch_quality": 10, "crowd_intensity": 10, "altitude": 750, "city": "São Paulo"},
+            "Allianz Parque": {"capacity": 43713, "pitch_quality": 9, "crowd_intensity": 9, "altitude": 760, "city": "São Paulo"},
+            "Mineirão": {"capacity": 61927, "pitch_quality": 8, "crowd_intensity": 8, "altitude": 852, "city": "Belo Horizonte"},
+            "Arena da Baixada": {"capacity": 42372, "pitch_quality": 8, "crowd_intensity": 9, "altitude": 924, "city": "Curitiba"},
+            "Beira-Rio": {"capacity": 50842, "pitch_quality": 9, "crowd_intensity": 9, "altitude": 3, "city": "Porto Alegre"},
+            "Arena Fonte Nova": {"capacity": 50025, "pitch_quality": 8, "crowd_intensity": 8, "altitude": 8, "city": "Salvador"}
+        }
+        
+        # Condições climáticas extremamente detalhadas
+        self.weather_conditions = {
+            "sol_escaldante": {"temp": 38, "humidity": 25, "wind": 5, "effect": "Jogadores cansam 40% mais rápido", "visibility": 10},
+            "chuva_torrencial": {"temp": 18, "humidity": 95, "wind": 25, "effect": "Dribles reduzidos em 60%, passes imprecisos", "visibility": 4},
+            "tempestade_eletrica": {"temp": 16, "humidity": 98, "wind": 45, "effect": "Jogo pode ser suspenso, jogadores nervosos", "visibility": 2},
+            "neblina_densa": {"temp": 12, "humidity": 99, "wind": 2, "effect": "Visibilidade crítica, passes longos impossíveis", "visibility": 1},
+            "vento_forte": {"temp": 22, "humidity": 60, "wind": 50, "effect": "Bolas aéreas imprevisíveis, chutes desviados", "visibility": 8},
+            "clima_perfeito": {"temp": 24, "humidity": 55, "wind": 8, "effect": "Condições ideais para o futebol", "visibility": 10},
+            "calor_umido": {"temp": 32, "humidity": 85, "wind": 3, "effect": "Desidratação rápida, câimbras frequentes", "visibility": 7},
+            "frio_glacial": {"temp": 2, "humidity": 70, "wind": 20, "effect": "Músculos rígidos, maior risco de lesões", "visibility": 9}
+        }
+        
+        # Eventos ultra-detalhados categorizados
+        self.match_events = {
+            "gols_normais": [
+                "⚽ **GOLAÇO DE COBERTURA!** {} recebe na entrada da área e vê o goleiro adiantado - coloca por coima com classe!",
+                "⚽ **GOL DE LETRA!** {} recebe de costas e faz uma letra sensacional que morre no ângulo!",
+                "⚽ **CHUTE DE PRIMEIRA!** Cruzamento na medida para {} que bate de primeira no canto!",
+                "⚽ **GOL DE CALCANHAR!** {} improvisa um chute de calcanhar que pega o goleiro desprevenido!",
+                "⚽ **BOMBA DE FORA DA ÁREA!** {} arrisca de longe e acerta um míssil no ângulo!",
+                "⚽ **GOL DE CABEÇA!** Escanteio certeiro e {} sobe sozinho para cabecear no fundo das redes!",
+                "⚽ **GOLAÇO EM JOGADA INDIVIDUAL!** {} dribla 3 adversários e finaliza com categoria!",
+                "⚽ **GOL DE REBOTE!** O goleiro espalma e {} fica com a sobra para empurrar para o gol!",
+                "⚽ **FINALIZAÇÃO RASTEIRA!** {} recebe na área e bate rasteiro no canto baixo!",
+                "⚽ **GOL DE VOLEIO!** Bola sobra na área e {} pega de voleio - que pancada!"
+            ],
+            "penaltis": [
+                "🥅 **PÊNALTI MARCADO!** {} é derrubado na área de forma clara - sem discussão!",
+                "🥅 **PÊNALTI POLÊMICO!** Possível toque de mão na área - VAR confirma a marcação!",
+                "🥅 **PÊNALTI POR PISÃO!** {} é pisado na área adversária - penalty óbvio!",
+                "🥅 **PÊNALTI DE CARRINHO!** Entrada dura na área derruba {} - não sobrou dúvida!",
+                "🥅 **PÊNALTI APÓS REVISÃO!** VAR chama o árbitro para revisar lance duvidoso!"
+            ],
+            "conversoes_penalty": [
+                "⚽🎯 **PÊNALTI CONVERTIDO!** {} bate forte no canto e não dá chances para o goleiro!",
+                "⚽🎯 **GOL DE CAVADINHA!** {} tem a coragem de fazer uma cavadinha gelada!",
+                "⚽🎯 **PÊNALTI NO MEIO!** {} bate no meio enquanto o goleiro pula para o lado!",
+                "⚽🎯 **GOL COM FRIEZA!** {} espera o goleiro se mexer e coloca do outro lado!",
+                "⚽🎯 **PÊNALTI PERFEITO!** {} acerta exatamente no ângulo - impossível de defender!"
+            ],
+            "defesas_penalty": [
+                "🧤 **PÊNALTI DEFENDIDO!** O goleiro vai no canto certo e faz uma defesa espetacular!",
+                "😱 **PÊNALTI PERDIDO!** {} manda a bola por cima do gol - que desperdício!",
+                "🧤 **DEFESAÇA NO PÊNALTI!** O goleiro espalma e ainda consegue segurar no rebote!",
+                "😨 **PÊNALTI NA TRAVE!** {} acerta a trave e a bola sai pela linha de fundo!"
+            ],
+            "faltas_graves": [
+                "💥 **FALTA VIOLENTA!** {} comete uma entrada criminosa e pode ser expulso!",
+                "⚡ **CARRINHO DESLEAL!** {} vai com tudo na canela do adversário!",
+                "🤼 **AGRESSÃO!** {} parte para cima do adversário - confusão formada!",
+                "💢 **COTOVELADA!** {} acerta o cotovelo na cabeça do rival de forma proposital!",
+                "🦵 **PISÃO VIOLENTO!** {} pisa na perna do adversário com força!",
+                "👊 **EMPURRÃO AGRESSIVO!** {} empurra o adversário com violência desnecessária!"
+            ],
+            "gols_falta": [
+                "⚽🌟 **GOLAÇO DE FALTA!** {} cobra com perfeição e acerta o ângulo!",
+                "⚽🌟 **FALTA DIRETO NO GOL!** {} coloca a bola exatamente onde queria!",
+                "⚽🌟 **BARREIRA FURADA!** {} cobra rasteiro por baixo da barreira!",
+                "⚽🌟 **FALTA COM EFEITO!** {} dá um efeito incrível na bola que engana o goleiro!",
+                "⚽🌟 **TIRO LIVRE PERFEITO!** {} acerta um míssil de falta que não dá chance!"
+            ],
+            "cartoes_amarelos": [
+                "🟨 **Cartão Amarelo para {}!** Falta dura é punida pelo árbitro!",
+                "🟨 **Amarelo por reclamação!** {} exagera na contestação e é advertido!",
+                "🟨 **Cartão por simulação!** {} tenta enganar o árbitro e é punido!",
+                "🟨 **Amarelo por demora!** {} retarda o jogo propositalmente!",
+                "🟨 **Cartão por comemoração!** {} tira a camisa e é advertido!",
+                "🟨 **Amarelo por entrada dura!** {} comete falta tática e leva cartão!"
+            ],
+            "cartoes_vermelhos": [
+                "🟥 **EXPULSÃO DIRETA!** {} comete falta gravíssima e é expulso!",
+                "🟥 **SEGUNDO AMARELO!** {} já tinha cartão e agora está fora!",
+                "🟥 **CARTÃO VERMELHO POR AGRESSÃO!** {} agride adversário e é expulso!",
+                "🟥 **EXPULSÃO POR PALAVRÃO!** {} desrespita o árbitro e vai para o chuveiro!",
+                "🟥 **VERMELHO POR CUSPIR!** {} cospe no adversário - inadmissível!",
+                "🟥 **EXPULSO POR ENTRADA ASSASSINA!** {} quase quebra a perna do rival!"
+            ],
+            "defesas_especiais": [
+                "🧤 **DEFESA IMPOSSÍVEL!** O goleiro faz uma defesa que desafia a física!",
+                "🦸 **MILAGRE DEBAIXO DAS TRAVES!** Defesa espetacular salva o time!",
+                "🧤 **DEFESA COM O PÉ!** O goleiro usa o pé para evitar o gol!",
+                "🦶 **DEFESA REFLEXA!** O goleiro reage no último segundo!",
+                "🧤 **DEFESA EM DOIS TEMPOS!** Primeira defesa e depois segura o rebote!",
+                "🙌 **DEFESA COM AS DUAS MÃOS!** O goleiro voa para fazer a defesa!"
+            ],
+            "eventos_var": [
+                "📱 **VAR CHAMANDO!** Árbitro é chamado para revisar lance polêmico!",
+                "📺 **REVISÃO NO VAR!** Lance está sendo analisado detalhadamente!",
+                "⚖️ **VAR CONFIRMA!** Após análise, decisão de campo é mantida!",
+                "🔄 **VAR REVERTE!** Decisão do campo é alterada após revisão!",
+                "📱 **CHECK VAR!** Verificação rápida confirma que estava tudo correto!",
+                "📺 **VAR DEMORA!** Análise está levando mais tempo que o normal!"
+            ],
+            "lesoes": [
+                "🚑 **LESÃO GRAVE!** {} cai no gramado e precisa de atendimento médico!",
+                "😰 **JOGADOR MACHUCADO!** {} sente dores e pede substituição!",
+                "🏥 **LESÃO PREOCUPANTE!** {} é retirado de maca do campo!",
+                "💔 **CONTUSÃO MUSCULAR!** {} sente a coxa e não consegue continuar!",
+                "🦴 **POSSÍVEL FRATURA!** {} cai de forma estranha - situação preocupante!",
+                "😵 **JOGADOR DESACORDADO!** {} bate a cabeça e perde os sentidos!"
+            ],
+            "brigas_confusoes": [
+                "🥊 **PANCADARIA GENERALIZADA!** Players dos dois times se envolvem em confusão!",
+                "👊 **BRIGA NO GRAMADO!** {} e {} partem para agressão física!",
+                "🤼‍♂️ **CONFUSÃO TOTAL!** Banco de reservas entra em campo para separar!",
+                "💢 **CLIMA QUENTE!** Jogadores se empurram e árbitro perde controle!",
+                "⚔️ **GUERRA DECLARADA!** Times se desentendem e clima fica tenso!",
+                "🔥 **BAIXARIA NO CAMPO!** Jogadores partem para porrada - jogo interrompido!"
+            ],
+            "invasao_torcida": [
+                "🏃‍♂️ **INVASÃO DE CAMPO!** Torcedores invadem o gramado - jogo suspenso!",
+                "📱 **TORCEDOR NO CAMPO!** Segurança corre atrás de invasor!",
+                "🚨 **INVASÃO MASSIVA!** Centenas de torcedores entram no campo!",
+                "📸 **FÃ INVADE PARA SELFIE!** Torcedor entra só para tirar foto com ídolo!",
+                "🏃‍♀️ **TORCEDORA INVADE!** Segurança tem trabalho para retirar invasora!",
+                "⚡ **INVASÃO RELÂMPAGO!** Torcedor entra e sai correndo rapidamente!"
+            ],
+            "protestos_torcida": [
+                "🗣️ **TORCIDA IRRITADA!** Arquibancada vaia decisões do árbitro!",
+                "📢 **PROTESTO ORGANIZADO!** Torcida grita palavras de ordem!",
+                "🎵 **CANTO DE PROTESTO!** Torcida canta música ofensiva ao rival!",
+                "💨 **FUMAÇA NA ARQUIBANCADA!** Torcida acende sinalizadores!",
+                "📯 **CORNETAS E GRITOS!** Torcida faz barulho ensurdecedor!",
+                "🪧 **FAIXAS DE PROTESTO!** Torcida estende faixas criticando time!"
+            ],
+            "problemas_tecnicos": [
+                "⚡ **FALTA DE LUZ!** Problema elétrico no estádio - jogo interrompido!",
+                "📺 **FALHA NO VAR!** Sistema de vídeo apresenta problemas técnicos!",
+                "🔊 **SOM FALHOU!** Sistema de áudio do estádio parou de funcionar!",
+                "🏟️ **PROBLEMA NO GRAMADO!** Sprinklers ligam acidentalmente!",
+                "📱 **REDE SOBRECARREGADA!** Internet do estádio está instável!",
+                "🎬 **CÂMERAS FALHARAM!** Transmissão apresenta problemas técnicos!"
+            ],
+            "eventos_bizarros": [
+                "🐕 **CACHORRO INVADE!** Um cão entra em campo e atrapalha o jogo!",
+                "🦅 **PÁSSARO INTERFERE!** Ave voa baixo e atrapalha jogada!",
+                "⚽ **BOLA MURCHA!** Bola oficial perde ar durante o jogo!",
+                "🌧️ **CHUVA DE GRANIZO!** Pedras de gelo caem no campo!",
+                "🎆 **FOGOS NA ARQUIBANCADA!** Torcida solta fogos de artifício!",
+                "🚁 **HELICÓPTERO BAIXO!** Aeronave atrapalha visão dos jogadores!"
+            ],
+            "jogadas_geniais": [
+                "🎭 **JOGADA ENSAIADA!** Time executa lance treinado com perfeição!",
+                "🎪 **MALABARISMO!** {} faz embaixadinhas e deixa defesa perdida!",
+                "🎯 **LANÇAMENTO MILIMÉTRICO!** Passe de 40 metros encontra companheiro!",
+                "⚡ **CONTRA-ATAQUE RELÂMPAGO!** Time sai da defesa ao ataque em 3 segundos!",
+                "🎨 **ARTE EM CAMPO!** {} executa drible que vira obra de arte!",
+                "🧠 **JOGADA DE GÊNIO!** Time arquiteta lance de laboratório!"
+            ],
+            "erros_grotescos": [
+                "😱 **FRANGO HISTÓRICO!** Goleiro falha feio em bola fácil!",
+                "🤦 **PASSE ERRADO GROTESCO!** {} entrega bola de bandeja pro rival!",
+                "😵 **GOL CONTRA BIZARRO!** {} marca contra próprio gol de forma inacreditável!",
+                "🙈 **PERDEU IMPOSSÍVEL!** {} perde gol feito em baixo do gol!",
+                "💀 **ERRO AMADOR!** {} tropeça na própria perna!",
+                "🤯 **FALHA COLETIVA!** Time todo se confunde na mesma jogada!"
+            ]
+        }
+        
+        # Sistema de minuto a minuto
+        self.minute_markers = [3, 7, 12, 18, 23, 28, 34, 41, 45, 48, 52, 58, 63, 67, 73, 78, 84, 90]
+    
+    def generate_realistic_teams(self):
+        """Gera times com características realistas"""
+        team_names = [
+            "Flamengo", "Palmeiras", "São Paulo", "Corinthians", "Santos", "Grêmio",
+            "Internacional", "Atlético-MG", "Cruzeiro", "Vasco", "Botafogo", "Fluminense",
+            "Athletico-PR", "Bahia", "Sport", "Fortaleza", "Ceará", "Goiás"
+        ]
+        
+        team1, team2 = random.sample(team_names, 2)
+        
+        # Gerar características dos times
+        team1_stats = {
+            "attack": random.randint(65, 95),
+            "defense": random.randint(60, 90),
+            "form": random.choice(["excelente", "boa", "regular", "ruim"]),
+            "morale": random.randint(50, 100)
+        }
+        
+        team2_stats = {
+            "attack": random.randint(65, 95),
+            "defense": random.randint(60, 90),
+            "form": random.choice(["excelente", "boa", "regular", "ruim"]),
+            "morale": random.randint(50, 100)
+        }
+        
+        return team1, team1_stats, team2, team2_stats
+    
+    def select_referee_and_stadium(self):
+        """Seleciona árbitro e estádio"""
+        referee_name = random.choice(list(self.referees.keys()))
+        referee_data = self.referees[referee_name]
+        
+        stadium_name = random.choice(list(self.stadiums.keys()))
+        stadium_data = self.stadiums[stadium_name]
+        
+        return referee_name, referee_data, stadium_name, stadium_data
+    
+    def generate_weather(self):
+        """Gera condições climáticas"""
+        weather_type = random.choice(list(self.weather_conditions.keys()))
+        weather_data = self.weather_conditions[weather_type]
+        return weather_type, weather_data
+    
+    def calculate_event_probability(self, event_type, minute, team1_stats, team2_stats, match_context):
+        """Calcula probabilidade de eventos baseada em contexto"""
+        base_probabilities = {
+            "gol": 0.15,
+            "penalti": 0.08,
+            "cartao_amarelo": 0.25,
+            "cartao_vermelho": 0.03,
+            "falta_grave": 0.18,
+            "lesao": 0.05,
+            "briga": 0.02,
+            "invasao": 0.01,
+            "evento_bizarro": 0.005
+        }
+        
+        prob = base_probabilities.get(event_type, 0.1)
+        
+        # Modificadores baseados no contexto
+        if minute > 80:  # Final do jogo - mais eventos
+            prob *= 1.5
+        
+        if match_context.get("cards", 0) > 3:  # Jogo quente
+            prob *= 1.3
+        
+        if match_context.get("referee_strictness", 5) > 7:  # Árbitro rigoroso
+            if event_type in ["cartao_amarelo", "cartao_vermelho"]:
+                prob *= 1.6
+        
+        if match_context.get("weather_effect", 1) < 0.5:  # Tempo ruim
+            if event_type in ["lesao", "evento_bizarro"]:
+                prob *= 2
+        
+        return min(prob, 0.8)  # Máximo 80% de chance
+    
+    async def simulate_ultra_realistic_match(self, ctx, team1_name=None, team2_name=None):
+        """Simula partida ultra-realística"""
+        
+        # Gerar dados da partida
+        if team1_name and team2_name:
+            team1 = capitalizar_nome(team1_name)
+            team2 = capitalizar_nome(team2_name)
+            
+            # Gerar stats para os times fornecidos
+            team1_stats = {
+                "attack": random.randint(65, 95),
+                "defense": random.randint(60, 90),
+                "form": random.choice(["excelente", "boa", "regular", "ruim"]),
+                "morale": random.randint(50, 100)
+            }
+            
+            team2_stats = {
+                "attack": random.randint(65, 95),
+                "defense": random.randint(60, 90),
+                "form": random.choice(["excelente", "boa", "regular", "ruim"]),
+                "morale": random.randint(50, 100)
+            }
+        else:
+            team1, team1_stats, team2, team2_stats = self.generate_realistic_teams()
+        referee_name, referee_data, stadium_name, stadium_data = self.select_referee_and_stadium()
+        weather_type, weather_data = self.generate_weather()
+        
+        # Estado da partida
+        score = [0, 0]
+        events_log = []
+        cards = {"team1": {"yellow": 0, "red": 0}, "team2": {"yellow": 0, "red": 0}}
+        match_context = {
+            "referee_strictness": referee_data["strictness"],
+            "weather_effect": weather_data["visibility"] / 10,
+            "crowd_intensity": stadium_data["crowd_intensity"],
+            "cards": 0,
+            "injuries": 0,
+            "controversies": 0
+        }
+        
+        # Embed inicial super detalhado
+        initial_embed = discord.Embed(
+            title="🏟️ **TRANSMISSÃO ULTRA-REALISTA AO VIVO** 🏟️",
+            description=f"**🔴 PREPARANDO TRANSMISSÃO DETALHADA...**",
+            color=discord.Color.blue()
+        )
+        
+        initial_embed.add_field(
+            name="⚽ **CONFRONTO DA RODADA**",
+            value=f"🏠 **{team1}** (Ataque: {team1_stats['attack']}) 🆚 **{team2}** (Ataque: {team2_stats['attack']}) ✈️",
+            inline=False
+        )
+        
+        initial_embed.add_field(
+            name="🏟️ **LOCAL & CONDIÇÕES**",
+            value=f"**Estádio:** {stadium_name} ({stadium_data['capacity']:,} lugares)\n**Cidade:** {stadium_data['city']} - Altitude: {stadium_data['altitude']}m\n**Clima:** {weather_type.replace('_', ' ').title()} ({weather_data['temp']}°C)",
+            inline=True
+        )
+        
+        initial_embed.add_field(
+            name="👨‍⚖️ **ARBITRAGEM**",
+            value=f"**Árbitro:** {referee_name}\n**Rigor:** {referee_data['strictness']}/10\n**Uso VAR:** {referee_data['var_usage']}/10",
+            inline=True
+        )
+        
+        initial_embed.add_field(
+            name="🌤️ **ANÁLISE METEOROLÓGICA**",
+            value=f"**Temperatura:** {weather_data['temp']}°C\n**Umidade:** {weather_data['humidity']}%\n**Vento:** {weather_data['wind']} km/h\n**Visibilidade:** {weather_data['visibility']}/10\n**Impacto:** {weather_data['effect']}",
+            inline=False
+        )
+        
+        initial_embed.set_footer(text="🔴 Transmissão iniciando... Prepare-se para 90 minutos intensos! - Dev: YevgennyMXP")
+        
+        message = await ctx.reply(embed=initial_embed)
+        await asyncio.sleep(3)
+        
+        # Simulação minuto a minuto
+        for minute in self.minute_markers:
+            # Gerar eventos múltiplos por minuto
+            events_this_minute = []
+            
+            # Chance de múltiplos eventos por minuto
+            for _ in range(random.randint(1, 3)):
+                # Determinar tipo de evento baseado em probabilidades
+                event_roll = random.random()
+                
+                if event_roll < self.calculate_event_probability("gol", minute, team1_stats, team2_stats, match_context):
+                    # Evento de gol
+                    if random.random() < 0.1:  # 10% chance de pênalti
+                        penalty_event = random.choice(self.match_events["penaltis"])
+                        events_this_minute.append(f"`{minute}'` " + penalty_event.format(random.choice(["Silva", "Santos", "Oliveira", "Costa"])))
+                        
+                        # Converter pênalti
+                        if random.random() < 0.78:  # 78% de conversão
+                            conversion_event = random.choice(self.match_events["conversoes_penalty"])
+                            events_this_minute.append(f"`{minute}'` " + conversion_event.format(random.choice(["Silva", "Santos", "Oliveira"])))
+                            score[random.randint(0, 1)] += 1
+                        else:
+                            miss_event = random.choice(self.match_events["defesas_penalty"])
+                            events_this_minute.append(f"`{minute}'` " + miss_event)
+                    
+                    elif random.random() < 0.15:  # 15% chance de gol de falta
+                        foul_goal_event = random.choice(self.match_events["gols_falta"])
+                        events_this_minute.append(f"`{minute}'` " + foul_goal_event.format(random.choice(["Silva", "Santos", "Rodrigues"])))
+                        score[random.randint(0, 1)] += 1
+                    
+                    else:  # Gol normal
+                        goal_event = random.choice(self.match_events["gols_normais"])
+                        events_this_minute.append(f"`{minute}'` " + goal_event.format(random.choice(["Silva", "Santos", "Costa", "Pereira"])))
+                        score[random.randint(0, 1)] += 1
+                
+                elif event_roll < 0.3:  # Eventos de cartão
+                    if random.random() < 0.1:  # 10% vermelho
+                        red_event = random.choice(self.match_events["cartoes_vermelhos"])
+                        events_this_minute.append(f"`{minute}'` " + red_event.format(random.choice(["Santos", "Silva", "Oliveira"])))
+                        cards["team1" if random.random() > 0.5 else "team2"]["red"] += 1
+                        match_context["cards"] += 1
+                    else:  # Amarelo
+                        yellow_event = random.choice(self.match_events["cartoes_amarelos"])
+                        events_this_minute.append(f"`{minute}'` " + yellow_event.format(random.choice(["Costa", "Lima", "Araújo"])))
+                        cards["team1" if random.random() > 0.5 else "team2"]["yellow"] += 1
+                        match_context["cards"] += 1
+                
+                elif event_roll < 0.45:  # Defesas especiais
+                    defense_event = random.choice(self.match_events["defesas_especiais"])
+                    events_this_minute.append(f"`{minute}'` " + defense_event)
+                
+                elif event_roll < 0.55:  # Faltas graves
+                    foul_event = random.choice(self.match_events["faltas_graves"])
+                    events_this_minute.append(f"`{minute}'` " + foul_event.format(random.choice(["Fernandes", "Carvalho", "Nascimento"])))
+                
+                elif event_roll < 0.62:  # VAR
+                    var_event = random.choice(self.match_events["eventos_var"])
+                    events_this_minute.append(f"`{minute}'` " + var_event)
+                    match_context["controversies"] += 1
+                
+                elif event_roll < 0.67:  # Lesões
+                    injury_event = random.choice(self.match_events["lesoes"])
+                    events_this_minute.append(f"`{minute}'` " + injury_event.format(random.choice(["Almeida", "Rodrigues", "Lima"])))
+                    match_context["injuries"] += 1
+                
+                elif event_roll < 0.72:  # Jogadas geniais
+                    genius_event = random.choice(self.match_events["jogadas_geniais"])
+                    events_this_minute.append(f"`{minute}'` " + genius_event.format(random.choice(["Santos", "Silva", "Costa"])))
+                
+                elif event_roll < 0.76:  # Erros grotescos
+                    error_event = random.choice(self.match_events["erros_grotescos"])
+                    events_this_minute.append(f"`{minute}'` " + error_event.format(random.choice(["Pereira", "Oliveira", "Nascimento"])))
+                
+                elif event_roll < 0.79:  # Brigas
+                    fight_event = random.choice(self.match_events["brigas_confusoes"])
+                    events_this_minute.append(f"`{minute}'` " + fight_event.format(random.choice(["Santos", "Silva"]), random.choice(["Costa", "Lima"])))
+                
+                elif event_roll < 0.82:  # Protestos da torcida
+                    protest_event = random.choice(self.match_events["protestos_torcida"])
+                    events_this_minute.append(f"`{minute}'` " + protest_event)
+                
+                elif event_roll < 0.84:  # Problemas técnicos
+                    tech_event = random.choice(self.match_events["problemas_tecnicos"])
+                    events_this_minute.append(f"`{minute}'` " + tech_event)
+                
+                elif event_roll < 0.86:  # Invasão de torcida
+                    invasion_event = random.choice(self.match_events["invasao_torcida"])
+                    events_this_minute.append(f"`{minute}'` " + invasion_event)
+                
+                elif event_roll < 0.88:  # Eventos bizarros
+                    bizarre_event = random.choice(self.match_events["eventos_bizarros"])
+                    events_this_minute.append(f"`{minute}'` " + bizarre_event)
+            
+            # Atualizar eventos log
+            events_log.extend(events_this_minute)
+            
+            # Determinar cor do embed baseada na intensidade
+            if len(events_this_minute) > 2:
+                embed_color = discord.Color.red()  # Minuto intenso
+            elif any("GOL" in event for event in events_this_minute):
+                embed_color = discord.Color.gold()  # Gol marcado
+            elif any("VERMELHO" in event or "EXPULS" in event for event in events_this_minute):
+                embed_color = discord.Color.dark_red()  # Expulsão
+            else:
+                embed_color = discord.Color.green()  # Jogo normal
+            
+            # Embed de minuto
+            minute_embed = discord.Embed(
+                title="🏟️ **TRANSMISSÃO ULTRA-REALISTA AO VIVO** 🏟️",
+                description=f"**🔴 MINUTO {minute}' - {team1} {score[0]} x {score[1]} {team2}**",
+                color=embed_color
+            )
+            
+            # Eventos deste minuto
+            if events_this_minute:
+                events_text = "\n".join(events_this_minute[-3:])  # Últimos 3 eventos
+                minute_embed.add_field(
+                    name=f"⚡ **EVENTOS DO MINUTO {minute}'**",
+                    value=events_text,
+                    inline=False
+                )
+            
+            # Estatísticas em tempo real
+            total_cards = cards["team1"]["yellow"] + cards["team1"]["red"] + cards["team2"]["yellow"] + cards["team2"]["red"]
+            minute_embed.add_field(
+                name="📊 **ESTATÍSTICAS AO VIVO**",
+                value=f"🟨 **Cartões:** {cards['team1']['yellow'] + cards['team2']['yellow']}\n🟥 **Expulsões:** {cards['team1']['red'] + cards['team2']['red']}\n🚑 **Lesões:** {match_context['injuries']}\n📱 **VAR:** {match_context['controversies']} análises",
+                inline=True
+            )
+            
+            # Condições da partida
+            minute_embed.add_field(
+                name="🌡️ **CONDIÇÕES ATUAIS**",
+                value=f"**Temperatura:** {weather_data['temp']}°C\n**Vento:** {weather_data['wind']} km/h\n**Árbitro:** {referee_name}\n**Público:** {stadium_data['capacity']:,}",
+                inline=True
+            )
+            
+            # Análise do clima da partida
+            if total_cards > 5:
+                climate = "🔥 **PARTIDA ESQUENTOU!**"
+            elif match_context["controversies"] > 2:
+                climate = "⚖️ **MUITAS POLÊMICAS!**"
+            elif score[0] + score[1] > 3:
+                climate = "⚽ **FESTIVAL DE GOLS!**"
+            elif match_context["injuries"] > 2:
+                climate = "🚑 **JOGO VIOLENTO!**"
+            else:
+                climate = "⚽ **JOGO EQUILIBRADO**"
+            
+            minute_embed.add_field(
+                name="🔥 **CLIMA DA PARTIDA**",
+                value=climate,
+                inline=False
+            )
+            
+            minute_embed.set_footer(text=f"🔴 AO VIVO • {minute}' • {weather_type.replace('_', ' ').title()} - Dev: YevgennyMXP")
+            
+            await message.edit(embed=minute_embed)
+            await asyncio.sleep(3.5)  # Pausa dramática entre minutos
+        
+        # Resultado final épico
+        final_embed = discord.Embed(
+            title="🏁 **FIM DE JOGO - TRANSMISSÃO ENCERRADA** 🏁",
+            description=f"**RESULTADO FINAL: {team1} {score[0]} x {score[1]} {team2}**",
+            color=discord.Color.gold()
+        )
+        
+        # Determinar vencedor
+        if score[0] > score[1]:
+            winner_text = f"🏆 **VITÓRIA DO {team1.upper()}!**"
+        elif score[1] > score[0]:
+            winner_text = f"🏆 **VITÓRIA DO {team2.upper()}!**"
+        else:
+            winner_text = "🤝 **EMPATE EMOCIONANTE!**"
+        
+        final_embed.add_field(
+            name="🏆 **RESULTADO**",
+            value=winner_text,
+            inline=False
+        )
+        
+        # Estatísticas finais completas
+        final_embed.add_field(
+            name="📊 **ESTATÍSTICAS COMPLETAS**",
+            value=f"⚽ **Total de Gols:** {score[0] + score[1]}\n🟨 **Cartões Amarelos:** {cards['team1']['yellow'] + cards['team2']['yellow']}\n🟥 **Expulsões:** {cards['team1']['red'] + cards['team2']['red']}\n🚑 **Lesões:** {match_context['injuries']}\n📱 **Análises VAR:** {match_context['controversies']}\n⚖️ **Polêmicas:** {match_context['controversies']}\n📈 **Eventos Totais:** {len(events_log)}",
+            inline=True
+        )
+        
+        # Dados da partida
+        final_embed.add_field(
+            name="🏟️ **DADOS DA PARTIDA**",
+            value=f"**Local:** {stadium_name}\n**Árbitro:** {referee_name}\n**Público:** {stadium_data['capacity']:,}\n**Temperatura:** {weather_data['temp']}°C\n**Condições:** {weather_type.replace('_', ' ').title()}",
+            inline=True
+        )
+        
+        # Melhores momentos
+        best_moments = [event for event in events_log if any(keyword in event for keyword in ["GOL", "EXPULS", "VERMELHO", "PÊNALTI", "INVASÃO", "BRIGA"])]
+        if best_moments:
+            final_embed.add_field(
+                name="🎬 **MELHORES MOMENTOS**",
+                value="\n".join(best_moments[-5:]),  # 5 melhores momentos
+                inline=False
+            )
+        
+        # Avaliação da partida
+        if len(events_log) > 20:
+            match_rating = "⭐⭐⭐⭐⭐ **PARTIDA ÉPICA!**"
+        elif len(events_log) > 15:
+            match_rating = "⭐⭐⭐⭐ **GRANDE JOGO!**"
+        elif len(events_log) > 10:
+            match_rating = "⭐⭐⭐ **BOM JOGO!**"
+        else:
+            match_rating = "⭐⭐ **JOGO NORMAL**"
+        
+        final_embed.add_field(
+            name="⭐ **AVALIAÇÃO DA PARTIDA**",
+            value=match_rating,
+            inline=False
+        )
+        
+        final_embed.set_footer(text="🏁 Transmissão encerrada • Obrigado por acompanhar! - Dev: YevgennyMXP")
+        
+        await message.edit(embed=final_embed)
+
+# Instanciar simulador ultra-realista
+ultra_match_simulator = UltraRealisticMatch()
+
+
 
 # --- Inicia o Bot ---
 if DISCORD_BOT_TOKEN is None:

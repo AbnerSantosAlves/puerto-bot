@@ -21,7 +21,7 @@ def download_file(filename):
     return {"error": "Arquivo não encontrado"}, 404
 
 def run():
-    port = int(os.getenv('PORT', 8000))
+    port = int(os.getenv('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
